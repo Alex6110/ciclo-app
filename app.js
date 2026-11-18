@@ -55,7 +55,8 @@ function stats() {
 function predici(st) {
   if (!st.p.length) return null;
   const last = st.p[st.p.length - 1], cyc = Math.round(st.cycle), pl = Math.round(st.period), list = [];
-  for (let k = 1; k <= 4; k++) { const s = add(last.start, cyc * k); list.push({ s, e: add(s, pl - 1), o: add(s, -14) }); }
+  const limite = `${new Date().getFullYear() + 1}-12-31`;
+  for (let k = 1; k <= 40; k++) { const s = add(last.start, cyc * k); if (k > 1 && s > limite) break; list.push({ s, e: add(s, pl - 1), o: add(s, -14) }); }
   return { last, cyc, pl, list, next: list[0] };
 }
 
@@ -134,14 +135,16 @@ function setFlow(d, v) {
 
 function eventi(pr, t) {
   const ev = [];
-  for (const x of pr.list) ev.push({ d: add(x.o, -5), n: 'Inizio finestra fertile' }, { d: x.o, n: 'Ovulazione' }, { d: x.s, n: 'Mestruazione' });
-  return ev.filter(e => e.d >= t).sort((a, b) => a.d < b.d ? -1 : 1).slice(0, 3);
+  for (const x of pr.list) ev.push({ k: 'ov', da: add(x.o, -5), a: add(x.o, 1), picco: x.o }, { k: 'me', da: x.s, a: x.s });
+  return ev.filter(e => e.a >= t).sort((a, b) => a.da < b.da ? -1 : 1).slice(0, 3);
 }
 function cardsOggi(st, pr, t) {
-  const rel = n => n === 0 ? 'oggi' : n === 1 ? 'domani' : `tra ${n} giorni`;
-  const ev = eventi(pr, t).map(e => `<div class="kv"><span>${e.n}<br><small class="mut">${rel(diff(e.d, t))}</small></span><b>${dm(e.d)}</b></div>`).join('');
+  const tra = n => n === 0 ? 'oggi' : n === 1 ? 'domani' : `tra ${n} giorni`;
+  const righe = eventi(pr, t).map(e => e.k === 'me'
+    ? `<div class="kv"><span>Mestruazione<br><small class="mut">${tra(diff(e.da, t))}</small></span><b>${dm(e.da)}</b></div>`
+    : `<div class="kv"><span>Ovulazione<br><small class="mut">${e.da <= t ? 'in corso' : tra(diff(e.da, t))}</small>${e.picco >= t ? `<br><small class="mut">Probabilità massima: ${dm(e.picco)}</small>` : ''}</span><b>${dm(e.da)} – ${dm(e.a)}</b></div>`).join('');
   const reg = st.sd <= 2 ? 'molto regolare' : st.sd <= 4 ? 'abbastanza regolare' : 'variabile';
-  return `<div class="box"><b>In arrivo</b>${ev}</div>
+  return `<div class="box">${`<b>In arrivo</b>`}${righe}</div>
     ${st.L.length ? `<div class="box"><b>Il tuo ciclo</b>
       <div class="kv"><span>Durata media del ciclo</span><b>${st.cycle.toFixed(0)} giorni</b></div>
       <div class="kv"><span>Durata media mestruazione</span><b>${st.period.toFixed(0)} giorni</b></div>
@@ -164,7 +167,7 @@ function viewOggi() {
     else if (sel <= o) { const n = diff(o, sel); a = n ? 'Ovulazione tra' : 'Ovulazione'; b = n ? g(n) : (sel === t ? 'oggi' : 'in questo giorno'); }
     else { const n = diff(next, sel); a = n > 0 ? 'Mestruazione tra' : n === 0 ? 'Mestruazione' : 'Mestruazione in ritardo di'; b = n > 0 ? g(n) : n === 0 ? 'attesa' : g(-n); }
     const dist = diff(sel, o), inP = sel >= start && sel <= end;
-    const fert = inP ? 'bassa' : dist >= -2 && dist <= 0 ? 'alta' : (dist >= -5 && dist <= 1) ? 'media' : 'bassa';
+    const fert = inP ? 'bassa' : dist === 0 ? 'massima' : dist >= -2 && dist < 0 ? 'alta' : (dist >= -5 && dist <= 1) ? 'media' : 'bassa';
     const r = Math.round(st.sd);
     hero = `<div class="hero">${ring(pr.cyc, cd, pr.pl)}<p class="lead">${a}</p><p class="bigv">${b}</p>
       <p class="mut">Probabilità di concepimento stimata: ${fert}</p>
@@ -180,9 +183,10 @@ function viewOggi() {
 function viewCal() {
   const st = stats(), pr = predici(st), t = oggi(), now = new Date();
   let h = `<div class="calhead"><div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}</div>
-    <p class="leg2">${editMest ? 'Tocca i giorni per aggiungere o togliere la mestruazione' : '<i class="lg p"></i>Mestruazione<i class="lg pp"></i>Prevista<i class="lg f"></i>Fertile<i class="lg o"></i>Ovulazione'}</p></div>
+    <p class="leg2">${editMest ? 'Tocca i giorni per aggiungere o togliere la mestruazione' : '<i class="lg p"></i>Mestruazione<i class="lg pp"></i>Prevista<i class="lg f"></i>Ovulazione<i class="lg o"></i>Più fertile'}</p></div>
     <button class="link cen" data-act="piu">Mostra mesi precedenti</button>`;
-  for (let k = -calDa; k <= 6; k++) {
+  const avanti = (now.getFullYear() + 1) * 12 + 11 - (now.getFullYear() * 12 + now.getMonth());
+  for (let k = -calDa; k <= avanti; k++) {
     const m0 = new Date(now.getFullYear(), now.getMonth() + k, 1), n = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate();
     const nome = m0.toLocaleDateString('it-IT', { month: 'long' }) + (m0.getFullYear() !== now.getFullYear() ? ' ' + m0.getFullYear() : '');
     let cells = '<span class="d x"></span>'.repeat((m0.getDay() + 6) % 7);
@@ -241,7 +245,10 @@ function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
   };
   const chips = (k, arr, on, val = x => x) => `<div class="chips" data-k="${k}">${arr.map(x => `<button class="chip${on(x) ? ' on' : ''}" data-v="${esc(val(x))}">${x}</button>`).join('')}</div>`;
   const parti = {
-    flusso: () => `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}`,
+    flusso: () => {
+      const p = get().flow > 0 && periodi().find(x => d >= x.start && d <= x.end);
+      return `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}${p ? `<button class="link danger" id="delc">Elimina questo ciclo (${dm(p.start)} – ${dm(p.end)})</button>` : ''}`;
+    },
     sintomi: () => `<h3>Sintomi</h3>${chips('sym', SINT, x => (get().sym || []).includes(x))}`,
     umore: () => `<h3>Umore</h3>${chips('mood', UMORI, x => get().mood === x)}`,
     note: () => `<h3>Note</h3><textarea id="nt" rows="3">${esc(get().note || '')}</textarea>`
@@ -249,8 +256,16 @@ function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
   dl.innerHTML = `<h2>${parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>${sez.map(k => parti[k]()).join('')}<button class="btn" id="ok">Fatto</button>`;
   dl.onclick = async e => {
     if (e.target === dl) return dl.close();
-    const b = e.target.closest('.chip,#ok'); if (!b) return;
+    const b = e.target.closest('.chip,#ok,#delc'); if (!b) return;
     if (b.id === 'ok') return dl.close();
+    if (b.id === 'delc') {
+      const p = periodi().find(x => d >= x.start && d <= x.end);
+      if (p && confirm(`Eliminare il ciclo dal ${dm(p.start)} al ${dm(p.end)}? Sintomi, umore e note restano.`)) {
+        for (let x = p.start; x <= p.end; x = add(x, 1)) if (S.days[x]) { S.days[x] = { ...S.days[x], flow: 0 }; ripulisci(x); }
+        await commit(); dl.close();
+      }
+      return;
+    }
     const k = b.parentElement.dataset.k, v = b.dataset.v, was = b.classList.contains('on');
     if (k === 'sym') b.classList.toggle('on');
     else { [...b.parentElement.children].forEach(c => c.classList.remove('on')); if (!was) b.classList.add('on'); }

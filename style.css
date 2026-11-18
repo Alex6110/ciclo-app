@@ -52,3 +52,12 @@ dialog::backdrop{background:rgba(10,5,20,.5)}
 .row{display:flex;gap:10px}
 .row .btn{margin-top:14px}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--fer);outline-offset:2px}
+
+/* Muudays: header con impostazioni, campi di testo, nav a due voci */
+header{display:flex;align-items:center;justify-content:space-between;padding-right:10px}
+#gear{border:0;background:none;color:var(--mut);width:44px;height:44px;border-radius:50%;display:grid;place-items:center;padding:0}
+#gear.on{color:var(--per)}
+nav button{font-size:15px}
+.tx{display:block;width:100%;font-size:16px;padding:12px 14px;margin-top:10px;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.cen{text-align:center;margin-top:14px}
+.btn:disabled{opacity:.5}

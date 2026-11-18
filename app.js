@@ -1,12 +1,15 @@
 'use strict';
+const SB = 'https://fwcxhbcyrcujcccwnvee.supabase.co';
+const PK = 'sb_publishable_2dX2Ahy1W-OLwocWYumtCw_KJoemZCn';
 const $ = (s, e = document) => e.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const FLUSSO = ['Nessuno', 'Leggero', 'Medio', 'Abbondante'];
 const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal di schiena', 'Nausea', 'Voglie'];
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
-const TITOLI = { oggi: 'Oggi', cal: 'Calendario', dati: 'Statistiche', imp: 'Impostazioni' };
 
-let S, tab = 'oggi', mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let S, sess = null, K = null, remoto = null, sync = '', msg = '';
+let auth = { step: 'email', email: '' }, tab = 'oggi';
+let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
 const idb = () => new Promise((res, rej) => {
@@ -15,16 +18,11 @@ const idb = () => new Promise((res, rej) => {
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
 });
-async function kv(mode, fn) {
-  const d = await idb();
-  return new Promise((res, rej) => {
-    const t = d.transaction('kv', mode), q = fn(t.objectStore('kv'));
-    t.oncomplete = () => res(q && q.result);
-    t.onerror = () => rej(t.error);
-  });
-}
-const load = async () => (await kv('readonly', s => s.get('state'))) || { days: {}, cfg: { cycle: 28, period: 5 } };
-const commit = async () => { await kv('readwrite', s => s.put(S, 'state')); render(); };
+const kvGet = async k => { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); };
+const kvSet = async (k, v) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+const kvDel = async k => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+const load = async () => { const s = (await kvGet('state')) || {}; return { days: s.days || {}, cfg: { cycle: 28, period: 5, ...s.cfg }, updated: s.updated }; };
+async function commit() { S.updated = new Date().toISOString(); await kvSet('state', S); render(); spingi(); }
 
 /* ---------- date ---------- */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -52,7 +50,7 @@ function stats() {
   const sd = r.length > 2 ? Math.sqrt(r.reduce((a, n) => a + (n - cycle) ** 2, 0) / r.length) : 0;
   const pl = p.slice(-7, -1).map(x => diff(x.end, x.start) + 1);
   const period = pl.length ? pl.reduce((a, b) => a + b) / pl.length : +S.cfg.period;
-  return { p, L, cycle, sd, period, n: r.length };
+  return { p, L, cycle, sd, period };
 }
 function predici(st) {
   if (!st.p.length) return null;
@@ -79,30 +77,27 @@ function ring(cyc, cd, pl) {
 
 function viewOggi() {
   const st = stats(), pr = predici(st), t = oggi();
-  if (!pr) return `<div class="box"><p><b>Si parte dal passato.</b></p><p class="mut">Apri il Calendario, torna indietro di qualche mese e tocca i giorni delle mestruazioni passate. Con tre o quattro cicli le previsioni iniziano a diventare affidabili.</p></div><button class="btn" data-d="${t}">Registra oggi</button>`;
+  if (!pr) return `<div class="box"><p><b>Si parte dal passato.</b></p><p class="mut">Apri il Calendario, torna indietro di qualche mese e tocca i giorni delle mestruazioni passate. Con tre o quattro cicli le previsioni diventano affidabili.</p></div><button class="btn" data-d="${t}">Registra oggi</button>`;
   const cd = diff(t, pr.last.start) + 1, n = pr.next, fra = diff(n.s, t), o = n.o;
   let fase;
   if (cd <= diff(pr.last.end, pr.last.start) + 1) fase = 'Mestruazione';
   else if (t === o) fase = 'Ovulazione stimata';
   else if (t >= add(o, -5) && t <= add(o, 1)) fase = 'Finestra fertile';
   else fase = t < o ? 'Fase follicolare' : 'Fase luteale';
-  const r = Math.round(st.sd);
-  let prossima = fra > 0 ? `Prossima mestruazione tra <b>${fra} ${fra === 1 ? 'giorno' : 'giorni'}</b>` : fra === 0 ? '<b>Mestruazione attesa oggi</b>' : `Mestruazione in ritardo di <b>${-fra} ${fra === -1 ? 'giorno' : 'giorni'}</b>`;
-  const e = S.days[t];
-  const reg = e ? [e.flow ? 'flusso ' + FLUSSO[e.flow].toLowerCase() : '', ...(e.sym || []).map(x => x.toLowerCase()), e.mood ? e.mood.toLowerCase() : ''].filter(Boolean).join(', ') : '';
+  const prossima = fra > 0 ? `Prossima mestruazione tra <b>${fra} ${fra === 1 ? 'giorno' : 'giorni'}</b>` : fra === 0 ? '<b>Mestruazione attesa oggi</b>' : `Mestruazione in ritardo di <b>${-fra} ${fra === -1 ? 'giorno' : 'giorni'}</b>`;
+  const r = Math.round(st.sd), e = S.days[t];
   return `<div class="hero">${ring(pr.cyc, cd, pr.pl)}<p class="ph">${fase}</p>
     <p>${prossima}</p>
     ${st.sd >= 1.5 ? `<p class="mut">Probabile tra il ${dm(add(n.s, -r))} e il ${dm(add(n.s, r))}</p>` : ''}
-    <p class="mut">Finestra fertile stimata: ${dm(add(o, -5))} – ${dm(add(o, 1))}</p>
-    ${reg ? `<p class="mut">Registrato oggi: ${esc(reg)}</p>` : ''}</div>
-    <button class="btn" data-d="${t}">${e ? 'Modifica oggi' : 'Registra oggi'}</button>`;
+    <p class="mut">Finestra fertile: ${dm(add(o, -5))} – ${dm(add(o, 1))}</p></div>
+    <button class="btn" data-d="${t}">${e ? 'Modifica oggi' : 'Registra oggi'}</button>
+    <p class="mut cen">In media il ciclo dura ${st.cycle.toFixed(0)} giorni e le mestruazioni ${st.period.toFixed(0)}.</p>`;
 }
 
 function viewCal() {
   const st = stats(), pr = predici(st), t = oggi();
   const y = mese.getFullYear(), m = mese.getMonth(), n = new Date(y, m + 1, 0).getDate();
-  const vuoti = (new Date(y, m, 1).getDay() + 6) % 7;
-  let cells = '<span class="d x"></span>'.repeat(vuoti);
+  let cells = '<span class="d x"></span>'.repeat((new Date(y, m, 1).getDay() + 6) % 7);
   for (let i = 1; i <= n; i++) {
     const d = iso(new Date(y, m, i)), e = S.days[d], c = ['d'];
     if (e && e.flow > 0) c.push('p');
@@ -116,59 +111,53 @@ function viewCal() {
   }
   return `<div class="nav"><button data-m="-1" aria-label="Mese precedente">‹</button><b>${mese.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</b><button data-m="1" aria-label="Mese successivo">›</button></div>
     <div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}${cells}</div>
-    <div class="leg"><span><i style="background:var(--per)"></i>Mestruazione</span><span><i style="box-shadow:inset 0 0 0 2px var(--per)"></i>Prevista</span><span><i style="background:color-mix(in srgb,var(--fer) 28%,transparent)"></i>Fertile</span><span><i style="box-shadow:inset 0 0 0 2px var(--fer)"></i>Ovulazione</span></div>
-    <p class="mut">Tocca un giorno per registrare flusso, sintomi e umore. Per lo storico, torna indietro con la freccia e usa «Segna giorni da qui».</p>`;
+    <div class="leg"><span><i style="background:var(--per)"></i>Mestruazione</span><span><i style="box-shadow:inset 0 0 0 2px var(--per)"></i>Prevista</span><span><i style="background:color-mix(in srgb,var(--fer) 28%,transparent)"></i>Fertile</span></div>
+    <p class="mut">Tocca un giorno per registrarlo. Per lo storico, torna indietro nei mesi e usa «Segna giorni da qui».</p>`;
 }
 
-function viewDati() {
-  const st = stats();
-  if (!st.p.length) return '<div class="box"><p class="mut">Nessun dato ancora. Registra le mestruazioni nel Calendario e qui compariranno le statistiche.</p></div>';
-  const cnt = {};
-  Object.values(S.days).forEach(e => (e.sym || []).forEach(x => cnt[x] = (cnt[x] || 0) + 1));
-  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  const reg = st.n < 3 ? 'servono almeno 3 cicli' : st.sd <= 2 ? 'molto regolare' : st.sd <= 4 ? 'abbastanza regolare' : 'variabile';
-  return `<div class="box">
-    <div class="kv"><span>Durata media del ciclo</span><b>${st.cycle.toFixed(1)} giorni</b></div>
-    <div class="kv"><span>Durata media mestruazione</span><b>${st.period.toFixed(1)} giorni</b></div>
-    <div class="kv"><span>Cicli registrati</span><b>${st.L.length}</b></div>
-    <div class="kv"><span>Regolarità</span><b>${reg}</b></div></div>
-    ${st.L.length ? `<div class="box"><b>Ultimi cicli (giorni)</b><div class="bars">${st.L.slice(-8).map(n => `<div style="height:${Math.min(100, n * 2)}px"><span>${n}</span></div>`).join('')}</div></div>` : ''}
-    ${top.length ? `<div class="box"><b>Sintomi più frequenti</b>${top.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${v}×</b></div>`).join('')}</div>` : ''}`;
+function boxAccount() {
+  const er = `<p class="mut" id="er">${esc(msg)}</p>`;
+  if (!sess) return auth.step === 'code'
+    ? `<div class="box"><b>Account</b><p class="mut">Abbiamo inviato un codice a ${esc(auth.email)}. Inseriscilo qui sotto.</p><input id="cd" class="tx" inputmode="numeric" autocomplete="one-time-code" placeholder="Codice"><button class="btn" data-act="verifica">Accedi</button><button class="link" data-act="cambia">Usa un'altra email</button>${er}</div>`
+    : `<div class="box"><b>Account e backup</b><p class="mut">Accedi con la tua email per salvare i dati cifrati e ritrovarli se cambi telefono.</p><input id="em" class="tx" type="email" autocomplete="email" placeholder="Email" value="${esc(auth.email)}"><button class="btn" data-act="invia">Invia codice</button>${er}</div>`;
+  if (!K) return `<div class="box"><b>Passphrase</b><p class="mut">${remoto ? 'Inserisci la passphrase per sbloccare il backup.' : 'Scegli una passphrase: cifra i dati prima che lascino il telefono. Se la perdi, il backup non è recuperabile.'}</p><input id="p1" class="tx" type="password" autocomplete="${remoto ? 'current-password' : 'new-password'}" placeholder="Passphrase">${remoto ? '' : '<input id="p2" class="tx" type="password" autocomplete="new-password" placeholder="Ripeti la passphrase">'}<button class="btn" data-act="sblocca">${remoto ? 'Sblocca' : 'Crea backup'}</button><button class="link" data-act="esci">Esci</button>${er}</div>`;
+  return `<div class="box"><b>Account</b><p class="mut">${esc(sess.email || '')}</p><p class="mut" id="sy">${esc(sync)}</p><div class="row"><button class="btn alt" data-act="sync">Sincronizza</button><button class="btn alt" data-act="esci">Esci</button></div></div>`;
 }
 
 function viewImp() {
-  return `<div class="box"><b>Valori di partenza</b><p class="mut">Usati finché non ci sono almeno due cicli registrati.</p>
+  return `<h2>Impostazioni</h2>${boxAccount()}
+    <div class="box"><b>Valori di partenza</b><p class="mut">Usati finché non ci sono almeno due cicli registrati.</p>
     <label class="f">Durata del ciclo (giorni)<input type="number" min="15" max="60" value="${S.cfg.cycle}" data-cfg="cycle"></label>
     <label class="f">Durata mestruazione (giorni)<input type="number" min="1" max="12" value="${S.cfg.period}" data-cfg="period"></label></div>
-    <div class="box"><b>Dati</b><p class="mut">I dati restano su questo telefono. Esporta una copia per sicurezza o per cambiare dispositivo.</p>
+    <div class="box"><b>Copia dei dati</b><p class="mut">Esporta un file di riserva o ripristina da uno già esportato.</p>
     <div class="row"><button class="btn alt" data-act="exp">Esporta</button><button class="btn alt" data-act="imp">Importa</button></div>
     <input type="file" id="fi" accept="application/json" hidden></div>
     <p class="mut">Le previsioni sono stime basate sui cicli registrati: non sono uno strumento contraccettivo né diagnostico.</p>`;
 }
 
 function render() {
-  $('#ttl').textContent = TITOLI[tab];
-  $('#v').innerHTML = { oggi: viewOggi, cal: viewCal, dati: viewDati, imp: viewImp }[tab]();
+  $('#v').innerHTML = { oggi: viewOggi, cal: viewCal, imp: viewImp }[tab]();
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  $('#gear').classList.toggle('on', tab === 'imp');
 }
 
 /* ---------- inserimento giorno ---------- */
 function apriGiorno(d) {
-  const cur = S.days[d] || {}, dl = $('#dlg'), sym = new Set(cur.sym || []);
+  const cur = S.days[d] || {}, dl = $('#dlg'), sym = new Set(cur.sym || []), pl = Math.round(+S.cfg.period);
   let flow = cur.flow || 0, mood = cur.mood || '';
-  const pl = Math.round(+S.cfg.period);
-  const chips = (arr, on, k) => arr.map((x, i) => `<button class="chip${on(x, i) ? ' on' : ''}" data-${k}="${i}">${x}</button>`).join('');
+  const chips = (arr, on) => arr.map((x, i) => `<button class="chip${on(x, i) ? ' on' : ''}" data-i="${i}">${x}</button>`).join('');
   dl.innerHTML = `<h2>${parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-    <h3>Flusso</h3><div class="chips" id="cf">${chips(FLUSSO, (x, i) => i === flow, 'i')}</div>
+    <h3>Flusso</h3><div class="chips" id="cf">${chips(FLUSSO, (x, i) => i === flow)}</div>
     <button class="link" id="bulk">Segna ${pl} giorni di mestruazione da qui</button>
-    <h3>Sintomi</h3><div class="chips" id="cs">${chips(SINT, x => sym.has(x), 'i')}</div>
-    <h3>Umore</h3><div class="chips" id="cm">${chips(UMORI, x => x === mood, 'i')}</div>
+    <h3>Sintomi</h3><div class="chips" id="cs">${chips(SINT, x => sym.has(x))}</div>
+    <h3>Umore</h3><div class="chips" id="cm">${chips(UMORI, x => x === mood)}</div>
     <h3>Note</h3><textarea id="nt" rows="2">${esc(cur.note || '')}</textarea>
     <div class="row"><button class="btn alt" id="no">Annulla</button><button class="btn" id="sv">Salva</button></div>
     ${S.days[d] ? '<button class="link" id="del">Cancella questo giorno</button>' : ''}`;
-  $('#cf').onclick = e => { const b = e.target.closest('.chip'); if (!b) return; flow = +b.dataset.i; [...$('#cf').children].forEach((c, i) => c.classList.toggle('on', i === flow)); };
-  $('#cs').onclick = e => { const b = e.target.closest('.chip'); if (!b) return; const k = SINT[+b.dataset.i]; sym.has(k) ? sym.delete(k) : sym.add(k); b.classList.toggle('on'); };
-  $('#cm').onclick = e => { const b = e.target.closest('.chip'); if (!b) return; const k = UMORI[+b.dataset.i]; mood = mood === k ? '' : k; [...$('#cm').children].forEach((c, i) => c.classList.toggle('on', UMORI[i] === mood)); };
+  const chip = (id, fn) => $(id).onclick = e => { const b = e.target.closest('.chip'); if (b) fn(+b.dataset.i, b); };
+  chip('#cf', i => { flow = i; [...$('#cf').children].forEach((c, j) => c.classList.toggle('on', j === i)); });
+  chip('#cs', (i, b) => { const k = SINT[i]; sym.has(k) ? sym.delete(k) : sym.add(k); b.classList.toggle('on'); });
+  chip('#cm', i => { mood = mood === UMORI[i] ? '' : UMORI[i]; [...$('#cm').children].forEach((c, j) => c.classList.toggle('on', UMORI[j] === mood)); });
   $('#no').onclick = () => dl.close();
   $('#sv').onclick = async () => {
     const e = { flow, sym: [...sym], mood, note: $('#nt').value.trim() };
@@ -183,17 +172,113 @@ function apriGiorno(d) {
   dl.showModal();
 }
 
+/* ---------- cifratura ---------- */
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = u => { u = new Uint8Array(u); let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); };
+const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function chiave(pass, salt) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function cifra() {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, K.k, enc.encode(JSON.stringify(S)));
+  return { salt: K.salt, iv: b64(iv), data: b64(ct) };
+}
+const decifra = async (k, r) => JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(r.iv) }, k, ub64(r.data))));
+
+/* ---------- Supabase (REST diretta, senza librerie) ---------- */
+async function api(path, opt = {}, token) {
+  const r = await fetch(SB + path, { ...opt, headers: { apikey: PK, 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...opt.headers } });
+  if (!r.ok) {
+    let m = ''; try { const j = await r.json(); m = j.msg || j.message || j.error_description || ''; } catch { }
+    throw Object.assign(new Error(m || 'Errore ' + r.status), { status: r.status });
+  }
+  return r.json().catch(() => null);
+}
+const salvaSess = j => { sess = { at: j.access_token, rt: j.refresh_token, exp: Date.now() + (j.expires_in - 30) * 1000, id: j.user?.id || sess?.id, email: j.user?.email || sess?.email }; return kvSet('sess', sess); };
+async function token() {
+  if (!sess) throw new Error('Accesso non effettuato');
+  if (Date.now() > sess.exp) {
+    try { await salvaSess(await api('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: sess.rt }) })); }
+    catch (e) { if (e.status >= 400 && e.status < 500) await esci(); throw e; }
+  }
+  return sess.at;
+}
+async function leggiRemoto() { const r = await api('/rest/v1/ciclo_backup?select=salt,iv,data,updated_at', {}, await token()); remoto = r && r[0] || null; }
+const stato = m => { sync = m; const e = $('#sy'); if (e) e.textContent = m; };
+let tm;
+function spingi() { if (sess && K) { clearTimeout(tm); tm = setTimeout(() => spingiOra().catch(() => { }), 1500); } }
+async function spingiOra() {
+  stato('Sincronizzazione…');
+  try {
+    const c = await cifra();
+    await api('/rest/v1/ciclo_backup', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: sess.id, ...c, updated_at: S.updated || new Date().toISOString() }) }, await token());
+    stato('Sincronizzato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }));
+  } catch (e) { stato('Sincronizzazione non riuscita: ' + e.message); throw e; }
+}
+async function tira() {
+  if (!sess || !K) return;
+  await leggiRemoto();
+  if (!remoto) return spingiOra();
+  const rt = new Date(remoto.updated_at), lt = new Date(S.updated || 0);
+  if (rt > lt) { S = await decifra(K.k, remoto); await kvSet('state', S); render(); stato('Aggiornato dal backup'); }
+  else if (lt > rt) await spingiOra();
+  else stato('Sincronizzato');
+}
+async function esci() { sess = null; K = null; remoto = null; auth = { step: 'email', email: '' }; await kvDel('sess'); await kvDel('key'); }
+
+const azioni = {
+  async invia() {
+    const em = $('#em').value.trim(); if (!em) return;
+    auth.email = em; msg = '';
+    await api('/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email: em, create_user: true }) });
+    auth.step = 'code'; render();
+  },
+  cambia() { auth.step = 'email'; msg = ''; render(); },
+  async verifica() {
+    const code = $('#cd').value.trim(); if (!code) return;
+    msg = ''; await salvaSess(await api('/auth/v1/verify', { method: 'POST', body: JSON.stringify({ type: 'email', email: auth.email, token: code }) }));
+    await leggiRemoto(); render();
+  },
+  async sblocca() {
+    const pass = $('#p1').value; msg = '';
+    if (!remoto) {
+      if (pass.length < 8) throw new Error('La passphrase deve avere almeno 8 caratteri.');
+      if (pass !== $('#p2').value) throw new Error('Le due passphrase non coincidono.');
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      K = { k: await chiave(pass, salt), salt: b64(salt) };
+      try { await kvSet('key', K); } catch { }
+      await spingiOra();
+    } else {
+      const k = await chiave(pass, ub64(remoto.salt)); let dati;
+      try { dati = await decifra(k, remoto); } catch { throw new Error('Passphrase errata.'); }
+      K = { k, salt: remoto.salt };
+      try { await kvSet('key', K); } catch { }
+      if (Object.keys(S.days).length && !confirm('Sul server ci sono già dei dati. OK = usa quelli del server (i dati di questo telefono vengono sostituiti). Annulla = tieni quelli di questo telefono e sovrascrivi il server.')) await spingiOra();
+      else { S = { days: dati.days || {}, cfg: { ...S.cfg, ...dati.cfg }, updated: dati.updated }; await kvSet('state', S); stato('Dati ripristinati dal backup'); }
+    }
+    render();
+  },
+  async sync() { await tira(); },
+  async esci() { await esci(); msg = ''; render(); },
+  exp() {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ v: 1, esportato: new Date().toISOString(), ...S })], { type: 'application/json' }));
+    a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  },
+  imp() { $('#fi').click(); }
+};
+
 /* ---------- eventi ---------- */
-$('#v').addEventListener('click', e => {
+$('#v').addEventListener('click', async e => {
   const b = e.target.closest('[data-d],[data-m],[data-act]'); if (!b) return;
   if (b.dataset.d) return apriGiorno(b.dataset.d);
   if (b.dataset.m) { mese = new Date(mese.getFullYear(), mese.getMonth() + +b.dataset.m, 1); return render(); }
-  if (b.dataset.act === 'exp') {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({ v: 1, esportato: new Date().toISOString(), ...S })], { type: 'application/json' }));
-    a.download = `ciclo-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  }
-  if (b.dataset.act === 'imp') $('#fi').click();
+  b.disabled = true;
+  try { await azioni[b.dataset.act](); }
+  catch (err) { msg = err.message; if (b.dataset.act === 'sync') stato('Sincronizzazione non riuscita: ' + err.message); else render(); }
+  b.disabled = false;
 });
 $('#v').addEventListener('change', async e => {
   if (e.target.dataset.cfg) { S.cfg[e.target.dataset.cfg] = Math.max(1, +e.target.value || 1); return commit(); }
@@ -203,14 +288,18 @@ $('#v').addEventListener('change', async e => {
       if (!j.days || typeof j.days !== 'object') throw 0;
       if (!confirm('Sostituire i dati attuali con quelli del file?')) return;
       S = { days: j.days, cfg: { ...S.cfg, ...j.cfg } }; await commit();
-    } catch { alert('File non valido: scegli un export di questa app.'); }
+    } catch { alert('File non valido: scegli un file esportato da Muudays.'); }
   }
 });
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) { tab = b.dataset.t; render(); } };
+$('#gear').onclick = () => { tab = 'imp'; render(); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tira().catch(() => { }); });
 
 (async () => {
-  S = await load();
+  S = await load(); sess = await kvGet('sess'); K = await kvGet('key');
   navigator.storage?.persist?.();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
   render();
+  if (sess && K) tira().catch(e => stato('Sincronizzazione non riuscita: ' + e.message));
+  else if (sess) leggiRemoto().then(render).catch(() => { });
 })();

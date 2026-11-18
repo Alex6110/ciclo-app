@@ -1,4 +1,4 @@
-const C = 'ciclo-v1';
+const C = 'muudays-v2';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {

@@ -1,7 +1,7 @@
 {
-  "name": "Ciclo",
-  "short_name": "Ciclo",
-  "description": "Monitora il ciclo mestruale, senza pubblicità.",
+  "name": "Muudays",
+  "short_name": "Muudays",
+  "description": "Il tuo ciclo, senza pubblicità.",
   "lang": "it",
   "start_url": ".",
   "scope": ".",

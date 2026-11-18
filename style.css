@@ -88,3 +88,25 @@ main{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
 .act.main b{background:var(--per);border-color:var(--per);color:#fff}
 .act.on:not(.main) b{border-color:var(--per);box-shadow:inset 0 0 0 1px var(--per)}
 .act svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Muudays 4: calendario scorrevole stile Flo, giorni auto-segnati, riquadri in basso */
+#v{position:relative}
+#v.cal{padding-top:0}
+.calhead{position:sticky;top:0;z-index:3;background:var(--bg);padding:6px 0 2px}
+.leg2{margin:2px 0 6px;text-align:center;font-size:12px;color:var(--mut)}
+.lg{display:inline-block;width:11px;height:11px;border-radius:50%;margin:0 5px 0 12px;vertical-align:-1px}
+.lg:first-child{margin-left:0}
+.lg.p{background:var(--per)}
+.lg.pp{border:2px dotted var(--per)}
+.lg.f{background:var(--fer)}
+.lg.o{border:2px dotted var(--fer)}
+.mh{text-align:center;font:600 18px ui-serif,"New York",Georgia,serif;color:var(--ink);margin:26px 0 14px;text-transform:capitalize;border-top:1px solid var(--line);padding-top:18px}
+.mg{row-gap:16px}
+.d{font-size:16px}
+.d.pp{box-shadow:none;border:2px dotted var(--per);color:var(--per)}
+.d.f{background:none;color:var(--fer)}
+.d.o{background:none;box-shadow:none;border:2px dotted var(--fer);color:var(--fer)}
+.d.t{text-decoration:none;font-weight:800}
+.d.t::before{content:"OGGI";position:absolute;top:-14px;left:0;right:0;font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--ink)}
+.fab{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom));border:0;border-radius:999px;background:var(--per);color:#fff;font-size:16px;font-weight:600;padding:14px 26px;box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:4}
+.kv small{font-size:13px}

@@ -1,4 +1,4 @@
-const C = 'muudays-v3';
+const C = 'muudays-v4';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {

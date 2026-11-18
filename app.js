@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '';
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett;
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = false;
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -72,11 +72,14 @@ const IC = {
 };
 
 function classi(d, pr) {
-  const e = S.days[d], c = [];
+  const e = S.days[d], c = [], t = oggi();
   if (e && e.flow > 0) c.push('p');
-  else if (pr && d > pr.last.end) for (const x of pr.list) {
-    if (d >= x.s && d <= x.e) c.push('pp');
-    if (d === x.o) c.push('o'); else if (d >= add(x.o, -5) && d <= add(x.o, 1)) c.push('f');
+  else if (pr && d > pr.last.end) {
+    if (d >= t && d <= add(pr.last.start, pr.pl - 1)) c.push('pp');
+    for (const x of pr.list) {
+      if (d >= x.s && d <= x.e) c.push('pp');
+      if (d === x.o) c.push('o'); else if (d >= add(x.o, -5) && d <= add(x.o, 1)) c.push('f');
+    }
   }
   if (e && (e.sym?.length || e.mood || e.note)) c.push('n');
   return c;
@@ -89,7 +92,9 @@ function infoGiorno(sel, st, pr) {
   } else {
     const prev = st.p.filter(x => x.start <= sel).pop();
     if (!prev) return null;
-    start = prev.start; end = prev.end;
+    start = prev.start;
+    const fine = add(prev.start, pr.pl - 1);
+    end = prev === st.p[st.p.length - 1] && fine > prev.end ? fine : prev.end;
   }
   return { start, end, cd: diff(sel, start) + 1, o: add(start, pr.cyc - 14), next: add(start, pr.cyc) };
 }
@@ -107,6 +112,42 @@ function ring(cyc, cd, pl) {
     <circle cx="${100 + R * Math.cos(ang)}" cy="${100 + R * Math.sin(ang)}" r="11" fill="var(--bg)" stroke="var(--ink)" stroke-width="3"/>
     <text x="100" y="112" text-anchor="middle" font-size="46" font-family="ui-serif,'New York',Georgia,serif" font-weight="600" fill="var(--ink)">${cd}</text>
     <text x="100" y="134" text-anchor="middle" font-size="12" fill="var(--mut)">giorno del ciclo</text></svg>`;
+}
+
+function ripulisci(d) {
+  const e = S.days[d];
+  if (e && !e.flow && !(e.sym || []).length && !e.mood && !e.note) delete S.days[d];
+}
+// Segna (v = 1-3) o toglie (v = 0) la mestruazione. Al primo giorno di un nuovo periodo
+// segna in automatico anche i giorni successivi, fino alla durata media o a oggi.
+function setFlow(d, v) {
+  if (!v) { if (S.days[d]) { S.days[d] = { ...S.days[d], flow: 0 }; ripulisci(d); } return; }
+  const nuovo = !(S.days[add(d, -1)]?.flow > 0) && !(S.days[d]?.flow > 0);
+  const n = nuovo ? Math.round(stats().period) : 1, t = oggi();
+  for (let i = 0; i < n; i++) {
+    const x = add(d, i);
+    if (i && x > t) break;
+    if (i && S.days[x]?.flow > 0) continue;
+    S.days[x] = { ...S.days[x], flow: v };
+  }
+}
+
+function eventi(pr, t) {
+  const ev = [];
+  for (const x of pr.list) ev.push({ d: add(x.o, -5), n: 'Inizio finestra fertile' }, { d: x.o, n: 'Ovulazione' }, { d: x.s, n: 'Mestruazione' });
+  return ev.filter(e => e.d >= t).sort((a, b) => a.d < b.d ? -1 : 1).slice(0, 3);
+}
+function cardsOggi(st, pr, t) {
+  const rel = n => n === 0 ? 'oggi' : n === 1 ? 'domani' : `tra ${n} giorni`;
+  const ev = eventi(pr, t).map(e => `<div class="kv"><span>${e.n}<br><small class="mut">${rel(diff(e.d, t))}</small></span><b>${dm(e.d)}</b></div>`).join('');
+  const reg = st.sd <= 2 ? 'molto regolare' : st.sd <= 4 ? 'abbastanza regolare' : 'variabile';
+  return `<div class="box"><b>In arrivo</b>${ev}</div>
+    ${st.L.length ? `<div class="box"><b>Il tuo ciclo</b>
+      <div class="kv"><span>Durata media del ciclo</span><b>${st.cycle.toFixed(0)} giorni</b></div>
+      <div class="kv"><span>Durata media mestruazione</span><b>${st.period.toFixed(0)} giorni</b></div>
+      ${st.L.length > 2 ? `<div class="kv"><span>Regolarità</span><b>${reg}</b></div>` : ''}
+      <div class="bars">${st.L.slice(-6).map(n => `<div style="height:${Math.min(100, n * 2)}px"><span>${n}</span></div>`).join('')}</div>
+      <p class="mut cen">Giorni degli ultimi cicli</p></div>` : ''}`;
 }
 
 function viewOggi() {
@@ -133,22 +174,26 @@ function viewOggi() {
   const act = (s, ic, lab, on, main) => `<button class="act${main ? ' main' : ''}${on ? ' on' : ''}" data-s="${s}"><b>${IC[ic]}</b>${lab}</button>`;
   return `${strip}${hero}
     <div class="acts">${act('flusso', 'drop', 'Mestruazioni', e.flow > 0, true)}${act('sintomi', 'plus', 'Sintomi', e.sym?.length)}${act('umore', 'mood', 'Umore', e.mood)}${act('note', 'note', 'Note', e.note)}</div>
-    ${sel !== t ? `<button class="link cen" data-sel="${t}">Torna a oggi</button>` : ''}`;
+    ${sel !== t ? `<button class="link cen" data-sel="${t}">Torna a oggi</button>` : ''}${pr ? cardsOggi(st, pr, t) : ''}`;
 }
 
 function viewCal() {
-  const st = stats(), pr = predici(st), t = oggi();
-  const y = mese.getFullYear(), m = mese.getMonth(), n = new Date(y, m + 1, 0).getDate();
-  let cells = '<span class="d x"></span>'.repeat((new Date(y, m, 1).getDay() + 6) % 7);
-  for (let i = 1; i <= n; i++) {
-    const d = iso(new Date(y, m, i)), c = ['d', ...classi(d, pr)];
-    if (d === t) c.push('t');
-    cells += `<button class="${c.join(' ')}" data-d="${d}">${i}</button>`;
+  const st = stats(), pr = predici(st), t = oggi(), now = new Date();
+  let h = `<div class="calhead"><div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}</div>
+    <p class="leg2">${editMest ? 'Tocca i giorni per aggiungere o togliere la mestruazione' : '<i class="lg p"></i>Mestruazione<i class="lg pp"></i>Prevista<i class="lg f"></i>Fertile<i class="lg o"></i>Ovulazione'}</p></div>
+    <button class="link cen" data-act="piu">Mostra mesi precedenti</button>`;
+  for (let k = -calDa; k <= 6; k++) {
+    const m0 = new Date(now.getFullYear(), now.getMonth() + k, 1), n = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate();
+    const nome = m0.toLocaleDateString('it-IT', { month: 'long' }) + (m0.getFullYear() !== now.getFullYear() ? ' ' + m0.getFullYear() : '');
+    let cells = '<span class="d x"></span>'.repeat((m0.getDay() + 6) % 7);
+    for (let i = 1; i <= n; i++) {
+      const d = iso(new Date(m0.getFullYear(), m0.getMonth(), i)), c = ['d', ...classi(d, pr)];
+      if (d === t) c.push('t');
+      cells += `<button class="${c.join(' ')}" data-d="${d}">${i}</button>`;
+    }
+    h += `<h3 class="mh"${k === 0 ? ' id="mcur"' : ''}>${nome}</h3><div class="grid mg">${cells}</div>`;
   }
-  return `<div class="nav"><button data-m="-1" aria-label="Mese precedente">‹</button><b>${mese.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</b><button data-m="1" aria-label="Mese successivo">›</button></div>
-    <div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}${cells}</div>
-    <div class="leg"><span><i style="background:var(--per)"></i>Mestruazione</span><span><i style="box-shadow:inset 0 0 0 2px var(--per)"></i>Prevista</span><span><i style="background:color-mix(in srgb,var(--fer) 28%,transparent)"></i>Fertile</span></div>
-    <p class="mut">Tocca un giorno per registrarlo. Per lo storico, torna indietro nei mesi e usa «Segna i prossimi giorni».</p>`;
+  return h + `<div style="height:96px"></div><button class="fab" data-act="edit">${editMest ? 'Fine' : 'Modifica mestruazioni'}</button>`;
 }
 
 function boxAccount() {
@@ -172,11 +217,18 @@ function viewImp() {
 }
 
 function render() {
-  $('#v').innerHTML = { oggi: viewOggi, cal: viewCal, imp: viewImp }[tab]();
+  const v = $('#v');
+  v.innerHTML = { oggi: viewOggi, cal: viewCal, imp: viewImp }[tab]();
+  v.classList.toggle('cal', tab === 'cal');
   $('#hl').innerHTML = tab === 'oggi' ? IC.gear : IC.back;
   $('#hl').setAttribute('aria-label', tab === 'oggi' ? 'Impostazioni' : 'Indietro');
   $('#hr').innerHTML = IC.cal;
   $('#hr').style.visibility = tab === 'oggi' ? 'visible' : 'hidden';
+  if (tab === 'cal' && scrollCal) {
+    scrollCal = false;
+    const c = $('#mcur'), hd = $('.calhead');
+    if (c) v.scrollTop = c.offsetTop - (hd ? hd.offsetHeight : 0) - 8;
+  }
 }
 
 /* ---------- inserimento giorno (salvataggio immediato) ---------- */
@@ -189,7 +241,7 @@ function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
   };
   const chips = (k, arr, on, val = x => x) => `<div class="chips" data-k="${k}">${arr.map(x => `<button class="chip${on(x) ? ' on' : ''}" data-v="${esc(val(x))}">${x}</button>`).join('')}</div>`;
   const parti = {
-    flusso: () => `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}<button class="link" id="bulk">Segna i prossimi ${pl} giorni</button>`,
+    flusso: () => `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}`,
     sintomi: () => `<h3>Sintomi</h3>${chips('sym', SINT, x => (get().sym || []).includes(x))}`,
     umore: () => `<h3>Umore</h3>${chips('mood', UMORI, x => get().mood === x)}`,
     note: () => `<h3>Note</h3><textarea id="nt" rows="3">${esc(get().note || '')}</textarea>`
@@ -197,16 +249,12 @@ function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
   dl.innerHTML = `<h2>${parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>${sez.map(k => parti[k]()).join('')}<button class="btn" id="ok">Fatto</button>`;
   dl.onclick = async e => {
     if (e.target === dl) return dl.close();
-    const b = e.target.closest('.chip,#bulk,#ok'); if (!b) return;
+    const b = e.target.closest('.chip,#ok'); if (!b) return;
     if (b.id === 'ok') return dl.close();
-    if (b.id === 'bulk') {
-      for (let i = 0; i < pl; i++) { const x = add(d, i); S.days[x] = { ...S.days[x], flow: S.days[x]?.flow || 2 }; }
-      await commit(); return dl.close();
-    }
     const k = b.parentElement.dataset.k, v = b.dataset.v, was = b.classList.contains('on');
     if (k === 'sym') b.classList.toggle('on');
     else { [...b.parentElement.children].forEach(c => c.classList.remove('on')); if (!was) b.classList.add('on'); }
-    if (k === 'flow') await salva({ flow: was ? 0 : +v });
+    if (k === 'flow') { setFlow(d, was ? 0 : +v); await commit(); }
     if (k === 'mood') await salva({ mood: was ? '' : v });
     if (k === 'sym') { const s = new Set(get().sym || []); s.has(v) ? s.delete(v) : s.add(v); await salva({ sym: [...s] }); }
   };
@@ -309,13 +357,19 @@ const azioni = {
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ v: 1, esportato: new Date().toISOString(), ...S })], { type: 'application/json' }));
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
-  imp() { $('#fi').click(); }
+  imp() { $('#fi').click(); },
+  edit() { editMest = !editMest; render(); },
+  piu() { const v = $('#v'), h = v.scrollHeight, y = v.scrollTop; calDa += 12; render(); v.scrollTop = y + v.scrollHeight - h; }
 };
 
 /* ---------- eventi ---------- */
 $('#v').addEventListener('click', async e => {
   const b = e.target.closest('[data-d],[data-m],[data-act],[data-sel],[data-s]'); if (!b) return;
-  if (b.dataset.d) return apriGiorno(b.dataset.d);
+  if (b.dataset.d) {
+    if (!editMest) return apriGiorno(b.dataset.d);
+    setFlow(b.dataset.d, S.days[b.dataset.d]?.flow > 0 ? 0 : 2);
+    return commit();
+  }
   if (b.dataset.sel) { sel = b.dataset.sel; return render(); }
   if (b.dataset.s) return apriGiorno(sel, [b.dataset.s]);
   if (b.dataset.m) { mese = new Date(mese.getFullYear(), mese.getMonth() + +b.dataset.m, 1); return render(); }
@@ -335,8 +389,8 @@ $('#v').addEventListener('change', async e => {
     } catch { alert('File non valido: scegli un file esportato da Muudays.'); }
   }
 });
-$('#hl').onclick = () => { tab = tab === 'oggi' ? 'imp' : 'oggi'; render(); };
-$('#hr').onclick = () => { tab = 'cal'; render(); };
+$('#hl').onclick = () => { tab = tab === 'oggi' ? 'imp' : 'oggi'; editMest = false; render(); };
+$('#hr').onclick = () => { tab = 'cal'; scrollCal = true; editMest = false; render(); };
 let tx0 = null;
 $('#v').addEventListener('touchstart', e => { tx0 = e.target.closest('#strip') ? e.touches[0].clientX : null; }, { passive: true });
 $('#v').addEventListener('touchend', e => {

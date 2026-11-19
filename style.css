@@ -115,3 +115,62 @@ main{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
 .acts{margin-bottom:30px}
 .kv b{white-space:nowrap}
 .link.danger{color:#e5484d}
+
+/* Muudays 6: mascotte animata, calendario Mese/Anno, header stile Flo */
+header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:10px 8px 0}
+#hl{justify-self:start}
+#hr{justify-self:end;width:auto;min-width:44px;padding:0 10px;display:flex;align-items:center;gap:8px;font-size:17px;font-weight:500}
+#hc{text-align:center}
+#hc h1{font-size:24px}
+.seg{display:inline-flex;background:var(--sf);border-radius:999px;padding:4px}
+.seg button{border:0;background:none;color:var(--mut);padding:8px 22px;border-radius:999px;font-size:16px;font-weight:600}
+.seg button.on{background:var(--ink);color:var(--bg)}
+:root{--alga:#b8add9;--sabbia:#c9bfe6}
+@media(prefers-color-scheme:dark){:root{--alga:#4b3b7a;--sabbia:#3a2d62}}
+.scene{position:relative;border-radius:28px;overflow:hidden;margin:10px 0 6px;background:linear-gradient(#d9d2f2,#b9aee3)}
+.scene.s1{background:linear-gradient(#ffe3ec,#e5b9e8)}
+.scene.s2{background:linear-gradient(#2b2350,#4a3b82)}
+@media(prefers-color-scheme:dark){.scene{background:linear-gradient(#2a2145,#1f1833)}.scene.s1{background:linear-gradient(#3a2146,#2a1a3a)}.scene.s2{background:linear-gradient(#14102a,#2a2150)}}
+.scn{display:block;width:100%;height:auto}
+.bubble{position:absolute;left:14px;top:14px;max-width:58%;background:#fff;color:#1b1230;font-weight:600;font-size:14px;line-height:1.3;padding:9px 14px;border-radius:18px 18px 4px 18px;box-shadow:0 3px 10px rgba(0,0,0,.18)}
+.shr{transform-box:fill-box;transform-origin:50% 100%}
+.bob{animation:bob 3.2s ease-in-out infinite}.hop{animation:hop 2.8s ease-in-out infinite}.sway{animation:sway 3.4s ease-in-out infinite}.float{animation:float 5s ease-in-out infinite}.wave{animation:bob 4s ease-in-out infinite}
+.ant,.tail{transform-box:fill-box;transform-origin:0% 100%;animation:wiggle 2.6s ease-in-out infinite}
+.tail{animation-duration:2s}
+.wave .ant{animation-duration:.9s}
+.ombra{transform-box:fill-box;transform-origin:center;animation:ombra 3.2s ease-in-out infinite}
+.alga{transform-box:fill-box;transform-origin:50% 100%;animation:sway 4s ease-in-out infinite}
+.fx{transform-box:fill-box;transform-origin:center}
+.bl{animation:rise 5s linear infinite}.fl{animation:fall 6s linear infinite}.sp{animation:pulse 2.4s ease-in-out infinite}.ht{animation:heart 5s ease-in infinite}.tw{animation:twinkle 2.4s ease-in-out infinite}.zz{animation:zz 3s ease-in-out infinite}
+.scene.jump .shr{animation:hop .9s ease-out 1}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes hop{0%,55%,100%{transform:translateY(0) scale(1,1)}62%{transform:translateY(0) scale(1.04,.94)}75%{transform:translateY(-26px) scale(.97,1.04)}88%{transform:translateY(0) scale(1.04,.94)}}
+@keyframes sway{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(3deg)}}
+@keyframes float{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-10px) rotate(2deg)}}
+@keyframes wiggle{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(6deg)}}
+@keyframes ombra{0%,100%{transform:scale(1)}50%{transform:scale(.88)}}
+@keyframes rise{0%{transform:translateY(0);opacity:0}15%{opacity:.9}100%{transform:translateY(-150px);opacity:0}}
+@keyframes fall{0%{transform:translateY(-10px) rotate(0);opacity:0}10%{opacity:1}100%{transform:translateY(310px) rotate(300deg);opacity:1}}
+@keyframes pulse{0%,100%{transform:scale(.3);opacity:0}50%{transform:scale(1);opacity:1}}
+@keyframes heart{0%{transform:translateY(0) scale(.6);opacity:0}15%{opacity:1}100%{transform:translateY(-190px) scale(1.25);opacity:0}}
+@keyframes twinkle{0%,100%{opacity:.2}50%{opacity:1}}
+@keyframes zz{0%{transform:translate(0,0);opacity:0}25%{opacity:1}100%{transform:translate(14px,-34px);opacity:0}}
+@media(prefers-reduced-motion:reduce){.scn *,.scene .shr{animation:none!important}}
+.hero{padding-top:6px;text-align:center}
+.prob{margin:6px 0 0;font-size:16px}
+.info{border:1.5px solid var(--mut);background:none;color:var(--mut);width:22px;height:22px;border-radius:50%;font-size:13px;font-weight:700;margin-left:8px;padding:0;vertical-align:1px}
+.bigv{font-size:46px}
+.btn.danger{background:none;color:#e5484d;border:1.5px solid #e5484d;display:flex;align-items:center;justify-content:center;gap:8px}
+.mg{row-gap:22px}
+.d{font-size:18px}
+.mh{font-size:20px;margin-top:30px}
+.ynav{display:flex;align-items:center;justify-content:center;gap:18px;margin:12px 0 18px}
+.ynav b{font:600 22px ui-serif,"New York",Georgia,serif;min-width:70px;text-align:center}
+.ynav button{border:0;background:var(--sf);color:var(--ink);width:40px;height:40px;border-radius:50%;font-size:20px}
+.yg{display:grid;grid-template-columns:1fr 1fr;gap:26px 22px}
+.ym h4{margin:0 0 8px;text-align:center;font:600 16px ui-serif,"New York",Georgia,serif;text-transform:capitalize}
+.ym .grid{gap:2px}
+.ym .d{font-size:11px}
+.ym .d.pp,.ym .d.o{border-width:1.5px}
+.ym .d.t::before{display:none}
+.ym .d.t{font-weight:800}

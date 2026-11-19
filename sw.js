@@ -1,5 +1,5 @@
-const C = 'muudays-v5';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-192.png'];
+const C = 'muudays-v6';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'mascotte.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(C).then(c => c.addAll(FILES)));

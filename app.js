@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '';
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = false;
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, jumpOnce = false;
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -48,24 +48,47 @@ function stats() {
   r.forEach((n, i) => { w += i + 1; s += n * (i + 1); });
   const cycle = r.length ? s / w : +S.cfg.cycle;
   const sd = r.length > 2 ? Math.sqrt(r.reduce((a, n) => a + (n - cycle) ** 2, 0) / r.length) : 0;
+  const sdEff = r.length >= 3 ? Math.max(sd, 1.5) : 3;   // con pochi cicli registrati l'incertezza resta alta
   const pl = p.slice(-7, -1).map(x => diff(x.end, x.start) + 1);
   const period = pl.length ? pl.reduce((a, b) => a + b) / pl.length : +S.cfg.period;
-  return { p, L, cycle, sd, period };
+  return { p, L, cycle, sd, sdEff, period };
+}
+
+// Probabilità di concepimento per un rapporto in ciascun giorno rispetto all'ovulazione
+// (valori medi di Wilcox 1995 e Dunson 2002). L'ovulazione non è nota con certezza: la stimiamo
+// come "prossima mestruazione - 14 giorni" con un'incertezza che cresce con la variabilità dei
+// cicli e con la distanza nel tempo, e sommiamo le due cose. Il picco è il massimo della curva.
+const FR = { '-5': .10, '-4': .16, '-3': .14, '-2': .27, '-1': .31, '0': .33, '1': .08 };
+function finestra(o, k, sdc) {
+  const sg = Math.sqrt(k * sdc * sdc + 2.25), J = Math.ceil(2.5 * sg), P = {};
+  let tot = 0; const w = [];
+  for (let j = -J; j <= J; j++) { const x = Math.exp(-j * j / (2 * sg * sg)); w.push([j, x]); tot += x; }
+  for (const [j, x] of w) for (let r = -5; r <= 1; r++) { const d = add(o, j + r); P[d] = (P[d] || 0) + x / tot * FR[r]; }
+  let pk = o, mx = -1;
+  for (const d in P) if (P[d] > mx + 1e-9 || (Math.abs(P[d] - mx) < 1e-9 && Math.abs(diff(d, o)) < Math.abs(diff(pk, o)))) { mx = P[d]; pk = d; }
+  const days = Object.keys(P).filter(d => P[d] >= .4 * mx && Math.abs(diff(d, pk)) <= 7).sort();
+  return { P, pk, mx, da: days[0], a: days[days.length - 1] };
 }
 function predici(st) {
   if (!st.p.length) return null;
   const last = st.p[st.p.length - 1], cyc = Math.round(st.cycle), pl = Math.round(st.period), list = [];
   const limite = `${new Date().getFullYear() + 1}-12-31`;
-  for (let k = 1; k <= 40; k++) { const s = add(last.start, cyc * k); if (k > 1 && s > limite) break; list.push({ s, e: add(s, pl - 1), o: add(s, -14) }); }
+  for (let k = 1; k <= 40; k++) {
+    const s = add(last.start, cyc * k); if (k > 1 && s > limite) break;
+    const o = add(s, -14); list.push({ s, e: add(s, pl - 1), o, w: finestra(o, k, st.sdEff) });
+  }
   return { last, cyc, pl, list, next: list[0] };
 }
 
 /* ---------- viste ---------- */
 const mondayOf = s => add(s, -((parse(s).getDay() + 6) % 7));
+const ICS = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
 const IC = {
-  gear: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
-  cal: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>',
-  back: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  gear: `<svg width="24" height="24" viewBox="0 0 24 24" ${ICS} stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>`,
+  cal: `<svg width="26" height="26" viewBox="0 0 24 24" ${ICS} stroke-width="1.8"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>`,
+  back: `<svg width="26" height="26" viewBox="0 0 24 24" ${ICS} stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>`,
+  x: `<svg width="26" height="26" viewBox="0 0 24 24" ${ICS} stroke-width="2"><path d="M5 5l14 14M19 5L5 19"/></svg>`,
+  trash: `<svg width="20" height="20" viewBox="0 0 24 24" ${ICS} stroke-width="1.9"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`,
   drop: '<svg viewBox="0 0 24 24"><path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   mood: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14c1 1.5 2.5 2 4 2s3-.5 4-2M9 9.5v.5M15 9.5v.5"/></svg>',
@@ -79,7 +102,7 @@ function classi(d, pr) {
     if (d >= t && d <= add(pr.last.start, pr.pl - 1)) c.push('pp');
     for (const x of pr.list) {
       if (d >= x.s && d <= x.e) c.push('pp');
-      if (d === x.o) c.push('o'); else if (d >= add(x.o, -5) && d <= add(x.o, 1)) c.push('f');
+      if (d === x.w.pk) c.push('o'); else if (d >= x.w.da && d <= x.w.a) c.push('f');
     }
   }
   if (e && (e.sym?.length || e.mood || e.note)) c.push('n');
@@ -97,32 +120,32 @@ function infoGiorno(sel, st, pr) {
     const fine = add(prev.start, pr.pl - 1);
     end = prev === st.p[st.p.length - 1] && fine > prev.end ? fine : prev.end;
   }
-  return { start, end, cd: diff(sel, start) + 1, o: add(start, pr.cyc - 14), next: add(start, pr.cyc) };
+  const next = add(start, pr.cyc), k = Math.max(1, Math.round(diff(next, pr.last.start) / pr.cyc));
+  return { start, end, cd: diff(sel, start) + 1, next, w: finestra(add(next, -14), k, st.sdEff) };
 }
-
-function ring(cyc, cd, pl) {
-  const R = 78, C = 2 * Math.PI * R, o = cyc - 14, c = Math.min(cd, cyc);
-  const arc = (a, b, col) => {
-    a = Math.max(0, a); b = Math.min(cyc - 1, b);
-    return `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${col}" stroke-width="14" stroke-dasharray="${(b - a + 1) / cyc * C} ${C}" stroke-dashoffset="${-a / cyc * C}" transform="rotate(-90 100 100)"/>`;
-  };
-  const ang = (c - .5) / cyc * 2 * Math.PI - Math.PI / 2;
-  return `<svg class="ring" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Giorno ${cd} del ciclo">
-    <circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--line)" stroke-width="14"/>
-    ${arc(0, pl - 1, 'var(--per)')}${arc(o - 5, o + 1, 'var(--fer)')}
-    <circle cx="${100 + R * Math.cos(ang)}" cy="${100 + R * Math.sin(ang)}" r="11" fill="var(--bg)" stroke="var(--ink)" stroke-width="3"/>
-    <text x="100" y="112" text-anchor="middle" font-size="46" font-family="ui-serif,'New York',Georgia,serif" font-weight="600" fill="var(--ink)">${cd}</text>
-    <text x="100" y="134" text-anchor="middle" font-size="12" fill="var(--mut)">giorno del ciclo</text></svg>`;
-}
+const nivello = (d, w, inP) => inP ? 'bassa' : d === w.pk ? 'massima' : (w.P[d] || 0) >= .6 * w.mx ? 'alta' : (w.P[d] || 0) >= .3 * w.mx ? 'media' : 'bassa';
+const PROB = { bassa: 'Basse probabilità di rimanere incinta', media: 'Medie probabilità di rimanere incinta', alta: 'Alte probabilità di rimanere incinta', massima: 'Probabilità massima di rimanere incinta' };
+const MSG = {
+  no: ['Segna l\'ultima mestruazione e imparo a conoscerti.', 'Più cicli registri, più le previsioni migliorano.'],
+  me: ['Oggi vai piano: te lo meriti.', 'Una borsa calda e un tè fanno miracoli.', 'Ascolta il tuo corpo, oggi viene prima di tutto.'],
+  fo: ['L\'energia sta tornando: buon momento per iniziare qualcosa.', 'Una passeggiata oggi ti farà bene.', 'Giorni leggeri, approfittane!'],
+  ov: ['Giorni pieni di energia!', 'Siamo nella finestra fertile.', 'Bevi tanta acqua oggi.'],
+  lu: ['Se sei più stanca del solito è normale.', 'Dormire un po\' di più aiuta.', 'Concediti qualcosa di buono stasera.']
+};
 
 function ripulisci(d) {
   const e = S.days[d];
   if (e && !e.flow && !(e.sym || []).length && !e.mood && !e.note) delete S.days[d];
 }
-// Segna (v = 1-3) o toglie (v = 0) la mestruazione. Al primo giorno di un nuovo periodo
-// segna in automatico anche i giorni successivi, fino alla durata media o a oggi.
+// Segna (v = 1-3) o toglie (v = 0) la mestruazione.
+// Segnare il primo giorno di un nuovo periodo segna anche i successivi (durata media, ma non oltre oggi).
+// Togliere il primo giorno di un periodo toglie tutto il periodo; togliere un altro giorno solo quel giorno.
 function setFlow(d, v) {
-  if (!v) { if (S.days[d]) { S.days[d] = { ...S.days[d], flow: 0 }; ripulisci(d); } return; }
+  if (!v) {
+    const p = periodi().find(x => d >= x.start && d <= x.end), tutto = p && p.start === d;
+    for (let x = d, fine = tutto ? p.end : d; x <= fine; x = add(x, 1)) if (S.days[x]) { S.days[x] = { ...S.days[x], flow: 0 }; ripulisci(x); }
+    return;
+  }
   const nuovo = !(S.days[add(d, -1)]?.flow > 0) && !(S.days[d]?.flow > 0);
   const n = nuovo ? Math.round(stats().period) : 1, t = oggi();
   for (let i = 0; i < n; i++) {
@@ -135,7 +158,7 @@ function setFlow(d, v) {
 
 function eventi(pr, t) {
   const ev = [];
-  for (const x of pr.list) ev.push({ k: 'ov', da: add(x.o, -5), a: add(x.o, 1), picco: x.o }, { k: 'me', da: x.s, a: x.s });
+  for (const x of pr.list) ev.push({ k: 'ov', da: x.w.da, a: x.w.a, picco: x.w.pk }, { k: 'me', da: x.s, a: x.s });
   return ev.filter(e => e.a >= t).sort((a, b) => a.da < b.da ? -1 : 1).slice(0, 3);
 }
 function cardsOggi(st, pr, t) {
@@ -144,7 +167,7 @@ function cardsOggi(st, pr, t) {
     ? `<div class="kv"><span>Mestruazione<br><small class="mut">${tra(diff(e.da, t))}</small></span><b>${dm(e.da)}</b></div>`
     : `<div class="kv"><span>Ovulazione<br><small class="mut">${e.da <= t ? 'in corso' : tra(diff(e.da, t))}</small>${e.picco >= t ? `<br><small class="mut">Probabilità massima: ${dm(e.picco)}</small>` : ''}</span><b>${dm(e.da)} – ${dm(e.a)}</b></div>`).join('');
   const reg = st.sd <= 2 ? 'molto regolare' : st.sd <= 4 ? 'abbastanza regolare' : 'variabile';
-  return `<div class="box">${`<b>In arrivo</b>`}${righe}</div>
+  return `<div class="box"><b>In arrivo</b>${righe}</div>
     ${st.L.length ? `<div class="box"><b>Il tuo ciclo</b>
       <div class="kv"><span>Durata media del ciclo</span><b>${st.cycle.toFixed(0)} giorni</b></div>
       <div class="kv"><span>Durata media mestruazione</span><b>${st.period.toFixed(0)} giorni</b></div>
@@ -157,45 +180,54 @@ function viewOggi() {
   const st = stats(), pr = predici(st), t = oggi();
   const giorni = Array.from({ length: 7 }, (_, i) => add(sett, i));
   const strip = `<div class="strip" id="strip">${giorni.map((d, i) => `<button class="wd${d === sel ? ' sel' : ''}${d === t ? ' td' : ''}" data-sel="${d}"><span>${d === t ? 'OGGI' : 'LMMGVSD'[i]}</span><i class="${classi(d, pr).join(' ')}">${parse(d).getDate()}</i></button>`).join('')}</div>`;
-  const info = pr && infoGiorno(sel, st, pr);
-  let hero;
-  if (!info) hero = `<div class="box"><p><b>Si parte dal passato.</b></p><p class="mut">Tocca «Mestruazioni» per registrare l'ultima, oppure apri il calendario in alto a destra e segna quelle passate. Con tre o quattro cicli le previsioni diventano affidabili.</p></div>`;
-  else {
-    const { cd, o, next, start, end } = info, g = n => `${n} ${n === 1 ? 'giorno' : 'giorni'}`;
-    let a, b;
-    if (sel >= start && sel <= end) { a = 'Mestruazione'; b = `giorno ${cd}`; }
-    else if (sel <= o) { const n = diff(o, sel); a = n ? 'Ovulazione tra' : 'Ovulazione'; b = n ? g(n) : (sel === t ? 'oggi' : 'in questo giorno'); }
+  const info = pr && infoGiorno(sel, st, pr), g = n => `${n} ${n === 1 ? 'giorno' : 'giorni'}`;
+  let fase = 'no', a = '', b = '', prob = '', extra = '';
+  if (info) {
+    const { cd, next, start, end, w } = info, inP = sel >= start && sel <= end;
+    fase = inP ? 'me' : sel < w.da ? 'fo' : sel <= w.a ? 'ov' : 'lu';
+    if (inP) { a = 'Mestruazione'; b = `giorno ${cd}`; }
+    else if (sel <= w.pk) { const n = diff(w.pk, sel); a = n ? 'Ovulazione tra' : 'Ovulazione'; b = n ? g(n) : (sel === t ? 'oggi' : 'in questo giorno'); }
     else { const n = diff(next, sel); a = n > 0 ? 'Mestruazione tra' : n === 0 ? 'Mestruazione' : 'Mestruazione in ritardo di'; b = n > 0 ? g(n) : n === 0 ? 'attesa' : g(-n); }
-    const dist = diff(sel, o), inP = sel >= start && sel <= end;
-    const fert = inP ? 'bassa' : dist === 0 ? 'massima' : dist >= -2 && dist < 0 ? 'alta' : (dist >= -5 && dist <= 1) ? 'media' : 'bassa';
+    prob = PROB[nivello(sel, w, inP)];
     const r = Math.round(st.sd);
-    hero = `<div class="hero">${ring(pr.cyc, cd, pr.pl)}<p class="lead">${a}</p><p class="bigv">${b}</p>
-      <p class="mut">Probabilità di concepimento stimata: ${fert}</p>
-      ${st.sd >= 1.5 && a.startsWith('Mestruazione tra') ? `<p class="mut">Probabile tra il ${dm(add(next, -r))} e il ${dm(add(next, r))}</p>` : ''}</div>`;
+    if (st.sd >= 1.5 && a.startsWith('Mestruazione tra')) extra = `Probabile tra il ${dm(add(next, -r))} e il ${dm(add(next, r))}`;
   }
+  const sc = scena(sel), m = mIdx ? MSG[fase][(mIdx - 1) % MSG[fase].length] : 'Toccami ›';
+  const jump = jumpOnce; jumpOnce = false;
+  const hero = info
+    ? `<div class="hero"><p class="lead">${a}</p><p class="bigv">${b}</p>
+        <p class="prob">${prob}<button class="info" data-act="info" aria-label="Come viene calcolata">i</button></p>${extra ? `<p class="mut">${extra}</p>` : ''}</div>`
+    : `<div class="box"><p><b>Si parte dal passato.</b></p><p class="mut">Tocca «Mestruazioni» per registrare l'ultima, oppure apri il calendario in alto a destra e segna quelle passate. Con tre o quattro cicli le previsioni diventano affidabili.</p></div>`;
   const e = S.days[sel] || {};
   const act = (s, ic, lab, on, main) => `<button class="act${main ? ' main' : ''}${on ? ' on' : ''}" data-s="${s}"><b>${IC[ic]}</b>${lab}</button>`;
-  return `${strip}${hero}
+  return `${strip}<div class="scene s${sc.bg}${jump ? ' jump' : ''}" data-act="mascot">${sc.svg}<div class="bubble">${esc(m)}</div></div>${hero}
     <div class="acts">${act('flusso', 'drop', 'Mestruazioni', e.flow > 0, true)}${act('sintomi', 'plus', 'Sintomi', e.sym?.length)}${act('umore', 'mood', 'Umore', e.mood)}${act('note', 'note', 'Note', e.note)}</div>
     ${sel !== t ? `<button class="link cen" data-sel="${t}">Torna a oggi</button>` : ''}${pr ? cardsOggi(st, pr, t) : ''}`;
 }
 
+const idMese = (y, m) => `m${y}-${m}`;
 function viewCal() {
   const st = stats(), pr = predici(st), t = oggi(), now = new Date();
-  let h = `<div class="calhead"><div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}</div>
-    <p class="leg2">${editMest ? 'Tocca i giorni per aggiungere o togliere la mestruazione' : '<i class="lg p"></i>Mestruazione<i class="lg pp"></i>Prevista<i class="lg f"></i>Ovulazione<i class="lg o"></i>Più fertile'}</p></div>
+  const cella = (d, i, attr) => `<button class="${['d', ...classi(d, pr), ...(d === t ? ['t'] : [])].join(' ')}" ${attr}>${i}</button>`;
+  if (calVista === 'anno') {
+    let h = `<div class="ynav"><button data-y="-1" aria-label="Anno precedente">‹</button><b>${annoSel}</b><button data-y="1" aria-label="Anno successivo">›</button></div><div class="yg">`;
+    for (let m = 0; m < 12; m++) {
+      const m0 = new Date(annoSel, m, 1), n = new Date(annoSel, m + 1, 0).getDate();
+      let c = '<span class="d x"></span>'.repeat((m0.getDay() + 6) % 7);
+      for (let i = 1; i <= n; i++) c += cella(iso(new Date(annoSel, m, i)), i, `data-ym="${annoSel}-${m}"`);
+      h += `<div class="ym"><h4>${m0.toLocaleDateString('it-IT', { month: 'long' })}</h4><div class="grid">${c}</div></div>`;
+    }
+    return h + '</div>';
+  }
+  let h = `<div class="calhead"><div class="grid">${['L', 'M', 'M', 'G', 'V', 'S', 'D'].map(x => `<span class="dw">${x}</span>`).join('')}</div>${editMest ? '<p class="leg2">Tocca i giorni per aggiungere o togliere la mestruazione</p>' : ''}</div>
     <button class="link cen" data-act="piu">Mostra mesi precedenti</button>`;
   const avanti = (now.getFullYear() + 1) * 12 + 11 - (now.getFullYear() * 12 + now.getMonth());
   for (let k = -calDa; k <= avanti; k++) {
     const m0 = new Date(now.getFullYear(), now.getMonth() + k, 1), n = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate();
     const nome = m0.toLocaleDateString('it-IT', { month: 'long' }) + (m0.getFullYear() !== now.getFullYear() ? ' ' + m0.getFullYear() : '');
     let cells = '<span class="d x"></span>'.repeat((m0.getDay() + 6) % 7);
-    for (let i = 1; i <= n; i++) {
-      const d = iso(new Date(m0.getFullYear(), m0.getMonth(), i)), c = ['d', ...classi(d, pr)];
-      if (d === t) c.push('t');
-      cells += `<button class="${c.join(' ')}" data-d="${d}">${i}</button>`;
-    }
-    h += `<h3 class="mh"${k === 0 ? ' id="mcur"' : ''}>${nome}</h3><div class="grid mg">${cells}</div>`;
+    for (let i = 1; i <= n; i++) { const d = iso(new Date(m0.getFullYear(), m0.getMonth(), i)); cells += cella(d, i, `data-d="${d}"`); }
+    h += `<h3 class="mh" id="${idMese(m0.getFullYear(), m0.getMonth())}">${nome}</h3><div class="grid mg">${cells}</div>`;
   }
   return h + `<div style="height:96px"></div><button class="fab" data-act="edit">${editMest ? 'Fine' : 'Modifica mestruazioni'}</button>`;
 }
@@ -221,45 +253,58 @@ function viewImp() {
 }
 
 function render() {
-  const v = $('#v');
+  const v = $('#v'), hl = $('#hl'), hr = $('#hr'), hc = $('#hc');
   v.innerHTML = { oggi: viewOggi, cal: viewCal, imp: viewImp }[tab]();
   v.classList.toggle('cal', tab === 'cal');
-  $('#hl').innerHTML = tab === 'oggi' ? IC.gear : IC.back;
-  $('#hl').setAttribute('aria-label', tab === 'oggi' ? 'Impostazioni' : 'Indietro');
-  $('#hr').innerHTML = IC.cal;
-  $('#hr').style.visibility = tab === 'oggi' ? 'visible' : 'hidden';
+  hr.style.visibility = tab === 'imp' ? 'hidden' : 'visible';
+  if (tab === 'oggi') {
+    hl.innerHTML = IC.gear; hl.setAttribute('aria-label', 'Impostazioni');
+    hc.innerHTML = '<h1>Muudays</h1>';
+    hr.innerHTML = `<span>${parse(sel).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}</span>${IC.cal}`; hr.setAttribute('aria-label', 'Calendario');
+  } else if (tab === 'cal') {
+    hl.innerHTML = IC.x; hl.setAttribute('aria-label', 'Chiudi');
+    hc.innerHTML = `<div class="seg"><button data-v="mese" class="${calVista === 'mese' ? 'on' : ''}">Mese</button><button data-v="anno" class="${calVista === 'anno' ? 'on' : ''}">Anno</button></div>`;
+    hr.innerHTML = IC.gear; hr.setAttribute('aria-label', 'Impostazioni');
+  } else {
+    hl.innerHTML = IC.back; hl.setAttribute('aria-label', 'Indietro');
+    hc.innerHTML = '<h1>Muudays</h1>'; hr.innerHTML = '';
+  }
   if (tab === 'cal' && scrollCal) {
-    scrollCal = false;
-    const c = $('#mcur'), hd = $('.calhead');
+    const c = $('#' + scrollCal), hd = $('.calhead'); scrollCal = '';
     if (c) v.scrollTop = c.offsetTop - (hd ? hd.offsetHeight : 0) - 8;
   }
 }
+const apriInfo = (titolo, testo) => {
+  const dl = $('#dlg');
+  dl.innerHTML = `<h2>${titolo}</h2><p class="mut">${testo}</p><button class="btn" id="ok">Ho capito</button>`;
+  dl.onclick = e => { if (e.target === dl || e.target.id === 'ok') dl.close(); };
+  dl.onclose = null; dl.showModal();
+};
 
 /* ---------- inserimento giorno (salvataggio immediato) ---------- */
 function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
-  const dl = $('#dlg'), pl = Math.round(+S.cfg.period), get = () => S.days[d] || {};
+  const dl = $('#dlg'), get = () => S.days[d] || {};
   const salva = async patch => {
     const e = { ...get(), ...patch };
     if (!e.flow && !(e.sym || []).length && !e.mood && !e.note) delete S.days[d]; else S.days[d] = e;
     await commit();
   };
   const chips = (k, arr, on, val = x => x) => `<div class="chips" data-k="${k}">${arr.map(x => `<button class="chip${on(x) ? ' on' : ''}" data-v="${esc(val(x))}">${x}</button>`).join('')}</div>`;
+  const ciclo = () => get().flow > 0 && periodi().find(x => d >= x.start && d <= x.end);
+  const riga = () => `${sez.includes('flusso') && ciclo() ? `<button class="btn danger" id="delc">${IC.trash}Elimina ciclo</button>` : ''}<button class="btn" id="ok">Fatto</button>`;
   const parti = {
-    flusso: () => {
-      const p = get().flow > 0 && periodi().find(x => d >= x.start && d <= x.end);
-      return `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}${p ? `<button class="link danger" id="delc">Elimina questo ciclo (${dm(p.start)} – ${dm(p.end)})</button>` : ''}`;
-    },
+    flusso: () => `<h3>Mestruazione</h3>${chips('flow', FLUSSO.slice(1), x => get().flow === FLUSSO.indexOf(x), x => FLUSSO.indexOf(x))}`,
     sintomi: () => `<h3>Sintomi</h3>${chips('sym', SINT, x => (get().sym || []).includes(x))}`,
     umore: () => `<h3>Umore</h3>${chips('mood', UMORI, x => get().mood === x)}`,
     note: () => `<h3>Note</h3><textarea id="nt" rows="3">${esc(get().note || '')}</textarea>`
   };
-  dl.innerHTML = `<h2>${parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>${sez.map(k => parti[k]()).join('')}<button class="btn" id="ok">Fatto</button>`;
+  dl.innerHTML = `<h2>${parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>${sez.map(k => parti[k]()).join('')}<div class="row" id="brow">${riga()}</div>`;
   dl.onclick = async e => {
     if (e.target === dl) return dl.close();
     const b = e.target.closest('.chip,#ok,#delc'); if (!b) return;
     if (b.id === 'ok') return dl.close();
     if (b.id === 'delc') {
-      const p = periodi().find(x => d >= x.start && d <= x.end);
+      const p = ciclo();
       if (p && confirm(`Eliminare il ciclo dal ${dm(p.start)} al ${dm(p.end)}? Sintomi, umore e note restano.`)) {
         for (let x = p.start; x <= p.end; x = add(x, 1)) if (S.days[x]) { S.days[x] = { ...S.days[x], flow: 0 }; ripulisci(x); }
         await commit(); dl.close();
@@ -269,7 +314,7 @@ function apriGiorno(d, sez = ['flusso', 'sintomi', 'umore', 'note']) {
     const k = b.parentElement.dataset.k, v = b.dataset.v, was = b.classList.contains('on');
     if (k === 'sym') b.classList.toggle('on');
     else { [...b.parentElement.children].forEach(c => c.classList.remove('on')); if (!was) b.classList.add('on'); }
-    if (k === 'flow') { setFlow(d, was ? 0 : +v); await commit(); }
+    if (k === 'flow') { setFlow(d, was ? 0 : +v); await commit(); $('#brow').innerHTML = riga(); }
     if (k === 'mood') await salva({ mood: was ? '' : v });
     if (k === 'sym') { const s = new Set(get().sym || []); s.has(v) ? s.delete(v) : s.add(v); await salva({ sym: [...s] }); }
   };
@@ -373,19 +418,27 @@ const azioni = {
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
   imp() { $('#fi').click(); },
+  mascot() { mIdx++; jumpOnce = true; render(); },
+  info() { apriInfo('Come viene calcolata', 'È una stima basata sulla durata dei tuoi cicli registrati e su dati medi di fertilità giorno per giorno. Più cicli registri e più è regolare il tuo ciclo, più diventa precisa. Non è un metodo contraccettivo né uno strumento diagnostico.'); },
   edit() { editMest = !editMest; render(); },
   piu() { const v = $('#v'), h = v.scrollHeight, y = v.scrollTop; calDa += 12; render(); v.scrollTop = y + v.scrollHeight - h; }
 };
 
 /* ---------- eventi ---------- */
 $('#v').addEventListener('click', async e => {
-  const b = e.target.closest('[data-d],[data-m],[data-act],[data-sel],[data-s]'); if (!b) return;
+  const b = e.target.closest('[data-d],[data-m],[data-act],[data-sel],[data-s],[data-ym],[data-y]'); if (!b) return;
   if (b.dataset.d) {
     if (!editMest) return apriGiorno(b.dataset.d);
     setFlow(b.dataset.d, S.days[b.dataset.d]?.flow > 0 ? 0 : 2);
     return commit();
   }
-  if (b.dataset.sel) { sel = b.dataset.sel; return render(); }
+  if (b.dataset.sel) { sel = b.dataset.sel; mIdx = 0; return render(); }
+  if (b.dataset.ym) {
+    const [y, m] = b.dataset.ym.split('-').map(Number), now = new Date();
+    calDa = Math.max(calDa, now.getFullYear() * 12 + now.getMonth() - (y * 12 + m) + 1);
+    calVista = 'mese'; scrollCal = idMese(y, m); return render();
+  }
+  if (b.dataset.y) { annoSel = Math.min(new Date().getFullYear() + 1, Math.max(new Date().getFullYear() - 6, annoSel + +b.dataset.y)); return render(); }
   if (b.dataset.s) return apriGiorno(sel, [b.dataset.s]);
   if (b.dataset.m) { mese = new Date(mese.getFullYear(), mese.getMonth() + +b.dataset.m, 1); return render(); }
   b.disabled = true;
@@ -404,8 +457,10 @@ $('#v').addEventListener('change', async e => {
     } catch { alert('File non valido: scegli un file esportato da Muudays.'); }
   }
 });
+const meseOggi = () => { const n = new Date(); return idMese(n.getFullYear(), n.getMonth()); };
 $('#hl').onclick = () => { tab = tab === 'oggi' ? 'imp' : 'oggi'; editMest = false; render(); };
-$('#hr').onclick = () => { tab = 'cal'; scrollCal = true; editMest = false; render(); };
+$('#hr').onclick = () => { if (tab === 'oggi') { tab = 'cal'; calVista = 'mese'; scrollCal = meseOggi(); } else tab = 'imp'; editMest = false; render(); };
+$('#hc').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; calVista = b.dataset.v; annoSel = new Date().getFullYear(); scrollCal = meseOggi(); editMest = false; render(); };
 let tx0 = null;
 $('#v').addEventListener('touchstart', e => { tx0 = e.target.closest('#strip') ? e.touches[0].clientX : null; }, { passive: true });
 $('#v').addEventListener('touchend', e => {

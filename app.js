@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '';
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, jumpOnce = false;
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no';
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -51,7 +51,13 @@ function stats() {
   const sdEff = r.length >= 3 ? Math.max(sd, 1.5) : 3;   // con pochi cicli registrati l'incertezza resta alta
   const pl = p.slice(-7, -1).map(x => diff(x.end, x.start) + 1);
   const period = pl.length ? pl.reduce((a, b) => a + b) / pl.length : +S.cfg.period;
-  return { p, L, cycle, sd, sdEff, period };
+  // cicli già conclusi: l'ovulazione si ricostruisce a ritroso dalla mestruazione successiva (- 14 giorni)
+  const pass = [];
+  for (let i = 1; i < p.length; i++) {
+    const n = diff(p[i].start, p[i - 1].start);
+    if (n >= 15 && n <= 60) { const w = finestra(add(p[i].start, -14), 0, 0); pass.push({ da: w.da, a: w.a }); }
+  }
+  return { p, L, cycle, sd, sdEff, period, pass };
 }
 
 // Probabilità di concepimento per un rapporto in ciascun giorno rispetto all'ovulazione
@@ -77,7 +83,7 @@ function predici(st) {
     const s = add(last.start, cyc * k); if (k > 1 && s > limite) break;
     const o = add(s, -14); list.push({ s, e: add(s, pl - 1), o, w: finestra(o, k, st.sdEff) });
   }
-  return { last, cyc, pl, list, next: list[0] };
+  return { last, cyc, pl, list, next: list[0], pass: st.pass };
 }
 
 /* ---------- viste ---------- */
@@ -98,11 +104,14 @@ const IC = {
 function classi(d, pr) {
   const e = S.days[d], c = [], t = oggi();
   if (e && e.flow > 0) c.push('p');
-  else if (pr && d > pr.last.end) {
-    if (d >= t && d <= add(pr.last.start, pr.pl - 1)) c.push('pp');
-    for (const x of pr.list) {
-      if (d >= x.s && d <= x.e) c.push('pp');
-      if (d === x.w.pk) c.push('o'); else if (d >= x.w.da && d <= x.w.a) c.push('f');
+  else if (pr) {
+    for (const x of pr.pass) if (d >= x.da && d <= x.a) c.push('f');   // passato: solo numeri colorati, senza cerchio
+    if (d > pr.last.end) {
+      if (d >= t && d <= add(pr.last.start, pr.pl - 1)) c.push('pp');
+      for (const x of pr.list) {
+        if (d >= x.s && d <= x.e) c.push('pp');
+        if (d === x.w.pk) c.push('o'); else if (d >= x.w.da && d <= x.w.a) c.push('f');   // previsione: cerchio tratteggiato solo sul giorno più fertile
+      }
     }
   }
   if (e && (e.sym?.length || e.mood || e.note)) c.push('n');
@@ -193,14 +202,14 @@ function viewOggi() {
     if (st.sd >= 1.5 && a.startsWith('Mestruazione tra')) extra = `Probabile tra il ${dm(add(next, -r))} e il ${dm(add(next, r))}`;
   }
   const sc = scena(sel), m = mIdx ? MSG[fase][(mIdx - 1) % MSG[fase].length] : 'Toccami ›';
-  const jump = jumpOnce; jumpOnce = false;
+  faseOggi = fase;
   const hero = info
     ? `<div class="hero"><p class="lead">${a}</p><p class="bigv">${b}</p>
         <p class="prob">${prob}<button class="info" data-act="info" aria-label="Come viene calcolata">i</button></p>${extra ? `<p class="mut">${extra}</p>` : ''}</div>`
     : `<div class="box"><p><b>Si parte dal passato.</b></p><p class="mut">Tocca «Mestruazioni» per registrare l'ultima, oppure apri il calendario in alto a destra e segna quelle passate. Con tre o quattro cicli le previsioni diventano affidabili.</p></div>`;
   const e = S.days[sel] || {};
   const act = (s, ic, lab, on, main) => `<button class="act${main ? ' main' : ''}${on ? ' on' : ''}" data-s="${s}"><b>${IC[ic]}</b>${lab}</button>`;
-  return `${strip}<div class="scene s${sc.bg}${jump ? ' jump' : ''}" data-act="mascot">${sc.svg}<div class="bubble">${esc(m)}</div></div>${hero}
+  return `${strip}<div class="scene s${sc.bg}" data-act="mascot">${sc.svg}<div class="bubble">${esc(m)}</div></div>${hero}
     <div class="acts">${act('flusso', 'drop', 'Mestruazioni', e.flow > 0, true)}${act('sintomi', 'plus', 'Sintomi', e.sym?.length)}${act('umore', 'mood', 'Umore', e.mood)}${act('note', 'note', 'Note', e.note)}</div>
     ${sel !== t ? `<button class="link cen" data-sel="${t}">Torna a oggi</button>` : ''}${pr ? cardsOggi(st, pr, t) : ''}`;
 }
@@ -269,6 +278,7 @@ function render() {
     hl.innerHTML = IC.back; hl.setAttribute('aria-label', 'Indietro');
     hc.innerHTML = '<h1>Muudays</h1>'; hr.innerHTML = '';
   }
+  if (tab === 'oggi') { const sc = $('.scene'); if (sc) scenaInit(sc); }
   if (tab === 'cal' && scrollCal) {
     const c = $('#' + scrollCal), hd = $('.calhead'); scrollCal = '';
     if (c) v.scrollTop = c.offsetTop - (hd ? hd.offsetHeight : 0) - 8;
@@ -418,7 +428,12 @@ const azioni = {
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
   imp() { $('#fi').click(); },
-  mascot() { mIdx++; jumpOnce = true; render(); },
+  mascot(e) {
+    const z = scenaTocco(e); if (z === 'coccole') return;
+    const gioco = { testa: ['Boop!', 'Hihi, che solletico!', 'Mi fai arrossire…', 'Ancora, ancora!'], coda: ['Ehi, il mio codino!', 'Splash!'], acqua: ['Bloop bloop!', 'Che belle bolle!'], festa: ['Sei la mia persona preferita!'] };
+    const lista = z === 'corpo' ? MSG[faseOggi] : gioco[z];
+    mIdx++; $('.bubble').textContent = lista[(mIdx - 1) % lista.length];
+  },
   info() { apriInfo('Come viene calcolata', 'È una stima basata sulla durata dei tuoi cicli registrati e su dati medi di fertilità giorno per giorno. Più cicli registri e più è regolare il tuo ciclo, più diventa precisa. Non è un metodo contraccettivo né uno strumento diagnostico.'); },
   edit() { editMest = !editMest; render(); },
   piu() { const v = $('#v'), h = v.scrollHeight, y = v.scrollTop; calDa += 12; render(); v.scrollTop = y + v.scrollHeight - h; }
@@ -442,7 +457,7 @@ $('#v').addEventListener('click', async e => {
   if (b.dataset.s) return apriGiorno(sel, [b.dataset.s]);
   if (b.dataset.m) { mese = new Date(mese.getFullYear(), mese.getMonth() + +b.dataset.m, 1); return render(); }
   b.disabled = true;
-  try { await azioni[b.dataset.act](); }
+  try { await azioni[b.dataset.act](e); }
   catch (err) { msg = err.message; if (b.dataset.act === 'sync') stato('Sincronizzazione non riuscita: ' + err.message); else render(); }
   b.disabled = false;
 });

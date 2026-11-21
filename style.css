@@ -209,6 +209,10 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;paddin
 #hr span{white-space:nowrap}
 
 /* Muudays 9: barra di stato iOS trasparente + campi notifiche */
-@media (prefers-color-scheme: light){body::before{content:"";position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top,0px);background:#271b3a;z-index:60}}
 input[type=time],select{font-size:16px;padding:8px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 input[type=checkbox]{width:24px;height:24px;accent-color:var(--per)}
+
+/* Muudays 10: iOS 26 sfoca la fascia in alto sotto la Dynamic Island e non si può disattivare;
+   l'intestazione parte più in basso, così nessun contenuto finisce sotto la sfocatura */
+body{padding-top:0}
+header{padding-top:calc(env(safe-area-inset-top, 0px) + 30px)}

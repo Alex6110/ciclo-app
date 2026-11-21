@@ -475,7 +475,7 @@ let tn, coda = Promise.resolve();
 const pianificaSoon = () => { if (nf().on && sess && K) { clearTimeout(tn); tn = setTimeout(() => pianifica().catch(() => { }), 3000); } };
 const pianifica = () => (coda = coda.catch(() => { }).then(async () => {
   const tok = await token();
-  await api(`/rest/v1/push_coda?user_id=eq.${sess.id}&inviata=eq.false`, { method: 'DELETE' }, tok);
+  await api(`/rest/v1/push_coda?user_id=eq.${sess.id}&inviata=eq.false&due_at=gt.${encodeURIComponent(new Date().toISOString())}`, { method: 'DELETE' }, tok);
   const righe = [];
   for (const e of eventiNotifica()) righe.push({ user_id: sess.id, due_at: e.at, ...await cifraMsg(e.t, e.b) });
   if (righe.length) await api('/rest/v1/push_coda', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(righe) }, tok);

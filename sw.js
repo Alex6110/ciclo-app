@@ -1,5 +1,5 @@
-const C = 'muudays-v7';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'mascotte.js', 'manifest.webmanifest', 'icon-192.png'];
+const C = 'muudays-v9';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'mascotte.js', 'config.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(C).then(c => c.addAll(FILES)));
@@ -22,4 +22,29 @@ self.addEventListener('fetch', e => {
       .then(r => { const copy = r.clone(); caches.open(C).then(c => c.put(e.request, copy)); return r; })
       .catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))
   );
+});
+
+/* ---------- notifiche push ---------- */
+// Il messaggio arriva cifrato: lo decifro con la chiave del backup salvata nel telefono.
+const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const chiave = () => new Promise(res => {
+  const r = indexedDB.open('ciclo', 1);
+  r.onupgradeneeded = () => r.transaction.abort();
+  r.onerror = () => res(null);
+  r.onsuccess = () => {
+    try { const q = r.result.transaction('kv').objectStore('kv').get('key'); q.onsuccess = () => res(q.result ? q.result.k : null); q.onerror = () => res(null); }
+    catch { res(null); }
+  };
+});
+self.addEventListener('push', e => e.waitUntil((async () => {
+  let t = 'Muudays', b = 'C\'è un aggiornamento sul tuo ciclo.';
+  try {
+    const m = e.data.json(), k = await chiave();
+    if (k) { const j = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(m.iv) }, k, ub64(m.data)))); t = j.t || t; b = j.b || b; }
+  } catch { }
+  await self.registration.showNotification(t, { body: b, icon: 'icon-192.png', badge: 'icon-192.png' });
+})()));
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => cs.length ? cs[0].focus() : self.clients.openWindow('./')));
 });

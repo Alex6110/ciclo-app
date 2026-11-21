@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '';
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no';
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '';
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -22,7 +22,7 @@ const kvGet = async k => { const d = await idb(); return new Promise((res, rej) 
 const kvSet = async (k, v) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 const kvDel = async k => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 const load = async () => { const s = (await kvGet('state')) || {}; return { days: s.days || {}, cfg: { cycle: 28, period: 5, ...s.cfg }, updated: s.updated }; };
-async function commit() { S.updated = new Date().toISOString(); await kvSet('state', S); render(); spingi(); }
+async function commit() { S.updated = new Date().toISOString(); await kvSet('state', S); render(); spingi(); pianificaSoon(); }
 
 /* ---------- date ---------- */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -251,7 +251,7 @@ function boxAccount() {
 }
 
 function viewImp() {
-  return `<h2>Impostazioni</h2>${boxAccount()}
+  return `<h2>Impostazioni</h2>${boxAccount()}${boxNotifiche()}
     <div class="box"><b>Valori di partenza</b><p class="mut">Usati finché non ci sono almeno due cicli registrati.</p>
     <label class="f">Durata del ciclo (giorni)<input type="number" min="15" max="60" value="${S.cfg.cycle}" data-cfg="cycle"></label>
     <label class="f">Durata mestruazione (giorni)<input type="number" min="1" max="12" value="${S.cfg.period}" data-cfg="period"></label></div>
@@ -269,7 +269,7 @@ function render() {
   if (tab === 'oggi') {
     hl.innerHTML = IC.gear; hl.setAttribute('aria-label', 'Impostazioni');
     hc.innerHTML = '<h1>Muudays</h1>';
-    hr.innerHTML = `<span>${parse(sel).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}</span>${IC.cal}`; hr.setAttribute('aria-label', 'Calendario');
+    hr.innerHTML = `<span>${parse(sel).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }).replace('.', '')}</span>${IC.cal}`; hr.setAttribute('aria-label', 'Calendario');
   } else if (tab === 'cal') {
     hl.innerHTML = IC.x; hl.setAttribute('aria-label', 'Chiudi');
     hc.innerHTML = `<div class="seg"><button data-v="mese" class="${calVista === 'mese' ? 'on' : ''}">Mese</button><button data-v="anno" class="${calVista === 'anno' ? 'on' : ''}">Anno</button></div>`;
@@ -382,11 +382,11 @@ async function tira() {
   await leggiRemoto();
   if (!remoto) return spingiOra();
   const rt = new Date(remoto.updated_at), lt = new Date(S.updated || 0);
-  if (rt > lt) { S = await decifra(K.k, remoto); await kvSet('state', S); render(); stato('Aggiornato dal backup'); }
+  if (rt > lt) { S = await decifra(K.k, remoto); await kvSet('state', S); render(); stato('Aggiornato dal backup'); pianificaSoon(); }
   else if (lt > rt) await spingiOra();
   else stato('Sincronizzato');
 }
-async function esci() { sess = null; K = null; remoto = null; auth = { step: 'email', email: '' }; await kvDel('sess'); await kvDel('key'); }
+async function esci(pulisci) { if (pulisci && nf().on) { try { await notifOff(true); } catch { } } sess = null; K = null; remoto = null; auth = { step: 'email', email: '' }; await kvDel('sess'); await kvDel('key'); }
 
 const azioni = {
   async invia() {
@@ -421,13 +421,17 @@ const azioni = {
     render();
   },
   async sync() { await tira(); },
-  async esci() { await esci(); msg = ''; render(); },
+  async esci() { await esci(true); msg = ''; render(); },
   exp() {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ v: 1, esportato: new Date().toISOString(), ...S })], { type: 'application/json' }));
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
   imp() { $('#fi').click(); },
+  async notifOn() { msgN = ''; await notifOn(); msgN = 'Notifiche attivate.'; render(); },
+  async notifOff() { await notifOff(); msgN = ''; render(); },
+  async notifTest() { await notifTest(); msgN = 'Se vedi la notifica, tutto ok.'; $('#ne') && ($('#ne').textContent = msgN); },
+  async notifProva() { await notifProva(); msgN = 'Prova programmata: arriva entro 15 minuti.'; render(); },
   mascot(e) {
     const z = scenaTocco(e); if (z === 'coccole') return;
     const gioco = { testa: ['Boop!', 'Hihi, che solletico!', 'Mi fai arrossire…', 'Ancora, ancora!'], coda: ['Ehi, il mio codino!', 'Splash!'], acqua: ['Bloop bloop!', 'Che belle bolle!'], festa: ['Sei la mia persona preferita!'] };
@@ -438,6 +442,91 @@ const azioni = {
   edit() { editMest = !editMest; render(); },
   piu() { const v = $('#v'), h = v.scrollHeight, y = v.scrollTop; calDa += 12; render(); v.scrollTop = y + v.scrollHeight - h; }
 };
+
+/* ---------- notifiche push ---------- */
+// Il server conosce solo l'orario di invio: titolo e testo sono cifrati sul telefono con la chiave del backup
+// e decifrati dal service worker quando la notifica arriva.
+const NF0 = { on: false, mest: true, ovul: true, pre: 2, ora: '09:00' };
+const nf = () => ({ ...NF0, ...(S.cfg.notif || {}) });
+const u8 = x => { const b = atob((x + '='.repeat((4 - x.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+function pushOk() {
+  if ('serviceWorker' in navigator && 'Notification' in window && 'PushManager' in window) return 'ok';
+  return navigator.standalone === false ? 'ios-home' : 'no';
+}
+function eventiNotifica() {
+  const n = nf(); if (!n.on) return [];
+  const pr = predici(stats()); if (!pr) return [];
+  const [h, mi] = n.ora.split(':').map(Number), now = Date.now(), out = [];
+  const aggiungi = (d, t, b) => { const [y, m, g] = d.split('-').map(Number), dt = new Date(y, m - 1, g, h, mi, 0); if (dt.getTime() > now) out.push({ at: dt.toISOString(), t, b }); };
+  for (const x of pr.list.slice(0, 3)) {
+    if (n.mest) {
+      aggiungi(add(x.s, -n.pre), 'Ciclo in arrivo', `Tra ${n.pre} ${n.pre === 1 ? 'giorno' : 'giorni'} dovrebbe iniziare la mestruazione.`);
+      aggiungi(x.s, 'Mestruazione prevista', 'Oggi dovrebbe iniziare il ciclo.');
+    }
+    if (n.ovul) {
+      aggiungi(x.w.da, 'Ovulazione', 'Da oggi sei nella finestra fertile.');
+      aggiungi(x.w.pk, 'Giorno più fertile', 'Oggi la probabilità di rimanere incinta è la più alta.');
+    }
+  }
+  return out.sort((a, b) => a.at < b.at ? -1 : 1).slice(0, 16);
+}
+const cifraMsg = async (t, b) => { const iv = crypto.getRandomValues(new Uint8Array(12)); return { iv: b64(iv), data: b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, K.k, enc.encode(JSON.stringify({ t, b })))) }; };
+let tn, coda = Promise.resolve();
+const pianificaSoon = () => { if (nf().on && sess && K) { clearTimeout(tn); tn = setTimeout(() => pianifica().catch(() => { }), 3000); } };
+const pianifica = () => (coda = coda.catch(() => { }).then(async () => {
+  const tok = await token();
+  await api(`/rest/v1/push_coda?user_id=eq.${sess.id}&inviata=eq.false`, { method: 'DELETE' }, tok);
+  const righe = [];
+  for (const e of eventiNotifica()) righe.push({ user_id: sess.id, due_at: e.at, ...await cifraMsg(e.t, e.b) });
+  if (righe.length) await api('/rest/v1/push_coda', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(righe) }, tok);
+}));
+async function notifOn() {
+  if (!CONFIG.VAPID_PUBLIC) throw new Error('Notifiche non ancora configurate: manca la chiave VAPID in config.js.');
+  if (!sess || !K) throw new Error('Prima accedi con l\'email e sblocca il backup con la passphrase.');
+  const st = pushOk();
+  if (st === 'ios-home') throw new Error('Su iPhone aggiungi prima l\'app alla schermata Home e riaprila da lì.');
+  if (st !== 'ok') throw new Error('Questo browser non supporta le notifiche push.');
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Permesso negato: attivalo da Impostazioni di iOS > Notifiche > Muudays.');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8(CONFIG.VAPID_PUBLIC) });
+  const j = sub.toJSON();
+  await api('/rest/v1/push_sub', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ endpoint: j.endpoint, user_id: sess.id, p256dh: j.keys.p256dh, auth: j.keys.auth, updated_at: new Date().toISOString() }) }, await token());
+  S.cfg.notif = { ...nf(), on: true };
+  await commit(); await pianifica();
+}
+async function notifOff(remoto = true) {
+  S.cfg.notif = { ...nf(), on: false };
+  try {
+    const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+    if (remoto && sess) {
+      const tok = await token();
+      await api(`/rest/v1/push_coda?user_id=eq.${sess.id}&inviata=eq.false`, { method: 'DELETE' }, tok);
+      if (sub) await api(`/rest/v1/push_sub?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: 'DELETE' }, tok);
+    }
+    if (sub) await sub.unsubscribe();
+  } catch { }
+  await commit();
+}
+async function notifTest() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') throw new Error('Attiva prima le notifiche.');
+  const reg = await navigator.serviceWorker.ready;
+  await reg.showNotification('Muudays', { body: 'Prova riuscita: le notifiche funzionano.', icon: 'icon-192.png' });
+}
+async function notifProva() {
+  if (!sess || !K) throw new Error('Serve l\'account sbloccato.');
+  await api('/rest/v1/push_coda', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ user_id: sess.id, due_at: new Date().toISOString(), ...await cifraMsg('Muudays', 'Prova dal server riuscita.') }]) }, await token());
+}
+function boxNotifiche() {
+  const n = nf(), er = `<p class="mut" id="ne">${esc(msgN)}</p>`;
+  if (!n.on) return `<div class="box"><b>Notifiche</b><p class="mut">Un avviso quando sta per arrivare il ciclo o inizia l'ovulazione. Serve l'account con il backup sbloccato${navigator.standalone === false ? ', e su iPhone l\'app deve essere aggiunta alla schermata Home' : ''}.</p><button class="btn" data-act="notifOn">Attiva notifiche</button>${er}</div>`;
+  const sw = (k, lab) => `<label class="f">${lab}<input type="checkbox" data-nf="${k}" ${n[k] ? 'checked' : ''}></label>`;
+  return `<div class="box"><b>Notifiche</b>
+    ${sw('mest', 'Ciclo in arrivo')}${sw('ovul', 'Ovulazione e giorno più fertile')}
+    <label class="f">Giorni di preavviso per il ciclo<select data-nf="pre">${[1, 2, 3].map(x => `<option${x === n.pre ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+    <label class="f">Orario<input type="time" data-nf="ora" value="${n.ora}"></label>
+    <div class="row"><button class="btn alt" data-act="notifTest">Prova qui</button><button class="btn alt" data-act="notifProva">Prova dal server</button></div>
+    <button class="link" data-act="notifOff">Disattiva notifiche</button>${er}</div>`;
+}
 
 /* ---------- eventi ---------- */
 $('#v').addEventListener('click', async e => {
@@ -458,10 +547,11 @@ $('#v').addEventListener('click', async e => {
   if (b.dataset.m) { mese = new Date(mese.getFullYear(), mese.getMonth() + +b.dataset.m, 1); return render(); }
   b.disabled = true;
   try { await azioni[b.dataset.act](e); }
-  catch (err) { msg = err.message; if (b.dataset.act === 'sync') stato('Sincronizzazione non riuscita: ' + err.message); else render(); }
+  catch (err) { if (b.dataset.act.startsWith('notif')) { msgN = err.message; render(); } else msg = err.message; if (b.dataset.act === 'sync') stato('Sincronizzazione non riuscita: ' + err.message); else render(); }
   b.disabled = false;
 });
 $('#v').addEventListener('change', async e => {
+  if (e.target.dataset.nf) { const k = e.target.dataset.nf; S.cfg.notif = { ...nf(), [k]: e.target.type === 'checkbox' ? e.target.checked : k === 'pre' ? +e.target.value : e.target.value }; return commit(); }
   if (e.target.dataset.cfg) { S.cfg[e.target.dataset.cfg] = Math.max(1, +e.target.value || 1); return commit(); }
   if (e.target.id === 'fi' && e.target.files[0]) {
     try {

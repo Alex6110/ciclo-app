@@ -1,4 +1,4 @@
-const C = 'muudays-v10';
+const C = 'muudays-v11';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'mascotte.js', 'config.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {
@@ -37,11 +37,21 @@ const chiave = () => new Promise(res => {
   };
 });
 self.addEventListener('push', e => e.waitUntil((async () => {
+  // Mostra SEMPRE una notifica (iOS lo pretende): se qualcosa va storto nel leggere il messaggio, il testo lo dice.
   let t = 'Muudays', b = 'C\'è un aggiornamento sul tuo ciclo.';
   try {
-    const m = e.data.json(), k = await chiave();
-    if (k) { const j = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(m.iv) }, k, ub64(m.data)))); t = j.t || t; b = j.b || b; }
-  } catch { }
+    const m = e.data ? e.data.json() : null;
+    if (m && m.iv) {
+      const k = await Promise.race([chiave(), new Promise(r => setTimeout(() => r(null), 2000))]);
+      if (!k) b += ' (chiave non disponibile)';
+      else {
+        try {
+          const j = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(m.iv) }, k, ub64(m.data))));
+          t = j.t || t; b = j.b || b;
+        } catch { b += ' (decifratura non riuscita)'; }
+      }
+    }
+  } catch { b += ' (messaggio non leggibile)'; }
   await self.registration.showNotification(t, { body: b, icon: 'icon-192.png', badge: 'icon-192.png' });
 })()));
 self.addEventListener('notificationclick', e => {

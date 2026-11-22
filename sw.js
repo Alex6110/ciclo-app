@@ -1,4 +1,4 @@
-const C = 'muudays-v11';
+const C = 'muudays-v12';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'mascotte.js', 'config.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', e => {
@@ -30,10 +30,10 @@ const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const chiave = () => new Promise(res => {
   const r = indexedDB.open('ciclo', 1);
   r.onupgradeneeded = () => r.transaction.abort();
-  r.onerror = () => res(null);
+  r.onerror = () => res({ e: 'archivio' });
   r.onsuccess = () => {
-    try { const q = r.result.transaction('kv').objectStore('kv').get('key'); q.onsuccess = () => res(q.result ? q.result.k : null); q.onerror = () => res(null); }
-    catch { res(null); }
+    try { const q = r.result.transaction('kv').objectStore('kv').get('key'); q.onsuccess = () => res(q.result && q.result.k ? { k: q.result.k } : { e: 'assente' }); q.onerror = () => res({ e: 'lettura' }); }
+    catch { res({ e: 'archivio' }); }
   };
 });
 self.addEventListener('push', e => e.waitUntil((async () => {
@@ -42,8 +42,8 @@ self.addEventListener('push', e => e.waitUntil((async () => {
   try {
     const m = e.data ? e.data.json() : null;
     if (m && m.iv) {
-      const k = await Promise.race([chiave(), new Promise(r => setTimeout(() => r(null), 2000))]);
-      if (!k) b += ' (chiave non disponibile)';
+      const r = await Promise.race([chiave(), new Promise(x => setTimeout(() => x({ e: 'lenta' }), 3500))]), k = r.k;
+      if (!k) b += ` (chiave: ${r.e})`;
       else {
         try {
           const j = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(m.iv) }, k, ub64(m.data))));

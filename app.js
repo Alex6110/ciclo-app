@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '';
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '';
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '', keyOk = null;
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -20,6 +20,7 @@ const idb = () => new Promise((res, rej) => {
 });
 const kvGet = async k => { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); };
 const kvSet = async (k, v) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+async function salvaChiave() { try { await kvSet('key', K); const v = await kvGet('key'); return !!(v && v.k); } catch { return false; } }
 const kvDel = async k => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 const load = async () => { const s = (await kvGet('state')) || {}; return { days: s.days || {}, cfg: { cycle: 28, period: 5, ...s.cfg }, updated: s.updated }; };
 async function commit() { S.updated = new Date().toISOString(); await kvSet('state', S); render(); spingi(); pianificaSoon(); }
@@ -408,13 +409,13 @@ const azioni = {
       if (pass !== $('#p2').value) throw new Error('Le due passphrase non coincidono.');
       const salt = crypto.getRandomValues(new Uint8Array(16));
       K = { k: await chiave(pass, salt), salt: b64(salt) };
-      try { await kvSet('key', K); } catch { }
+      keyOk = await salvaChiave();
       await spingiOra();
     } else {
       const k = await chiave(pass, ub64(remoto.salt)); let dati;
       try { dati = await decifra(k, remoto); } catch { throw new Error('Passphrase errata.'); }
       K = { k, salt: remoto.salt };
-      try { await kvSet('key', K); } catch { }
+      keyOk = await salvaChiave();
       if (Object.keys(S.days).length && !confirm('Sul server ci sono già dei dati. OK = usa quelli del server (i dati di questo telefono vengono sostituiti). Annulla = tieni quelli di questo telefono e sovrascrivi il server.')) await spingiOra();
       else { S = { days: dati.days || {}, cfg: { ...S.cfg, ...dati.cfg }, updated: dati.updated }; await kvSet('state', S); stato('Dati ripristinati dal backup'); }
     }
@@ -483,6 +484,7 @@ const pianifica = () => (coda = coda.catch(() => { }).then(async () => {
 async function notifOn() {
   if (!CONFIG.VAPID_PUBLIC) throw new Error('Notifiche non ancora configurate: manca la chiave VAPID in config.js.');
   if (!sess || !K) throw new Error('Prima accedi con l\'email e sblocca il backup con la passphrase.');
+  if (!(await salvaChiave())) throw new Error('Questo telefono non riesce a salvare la chiave di cifratura: le notifiche non potrebbero mostrare il testo. Esci, accedi di nuovo con la passphrase e riprova.');
   const st = pushOk();
   if (st === 'ios-home') throw new Error('Su iPhone aggiungi prima l\'app alla schermata Home e riaprila da lì.');
   if (st !== 'ok') throw new Error('Questo browser non supporta le notifiche push.');
@@ -524,6 +526,7 @@ function boxNotifiche() {
     ${sw('mest', 'Ciclo in arrivo')}${sw('ovul', 'Ovulazione e giorno più fertile')}
     <label class="f">Giorni di preavviso per il ciclo<select data-nf="pre">${[1, 2, 3].map(x => `<option${x === n.pre ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">Orario<input type="time" data-nf="ora" value="${n.ora}"></label>
+    <p class="mut">Chiave per il testo delle notifiche: ${keyOk === false ? 'non salvata (esci e riaccedi con la passphrase)' : 'salvata'}.</p>
     <div class="row"><button class="btn alt" data-act="notifTest">Prova qui</button><button class="btn alt" data-act="notifProva">Prova dal server</button></div>
     <button class="link" data-act="notifOff">Disattiva notifiche</button>${er}</div>`;
 }

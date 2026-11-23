@@ -7,7 +7,7 @@ const FLUSSO = ['Nessuno', 'Leggero', 'Medio', 'Abbondante'];
 const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal di schiena', 'Nausea', 'Voglie'];
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
-let S, sess = null, K = null, remoto = null, sync = '', msg = '';
+let S, sess = null, K = null, remoto = null, sync = '', msg = '', spazio = null, snap = {}, codiceInvito = '', membriN = 0;
 let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '', keyOk = null;
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
@@ -22,8 +22,35 @@ const kvGet = async k => { const d = await idb(); return new Promise((res, rej) 
 const kvSet = async (k, v) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
 async function salvaChiave() { try { await kvSet('key', K); const v = await kvGet('key'); return !!(v && v.k); } catch { return false; } }
 const kvDel = async k => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
-const load = async () => { const s = (await kvGet('state')) || {}; return { days: s.days || {}, cfg: { cycle: 28, period: 5, ...s.cfg }, updated: s.updated }; };
-async function commit() { S.updated = new Date().toISOString(); await kvSet('state', S); render(); spingi(); pianificaSoon(); }
+const load = async () => { const s = (await kvGet('state')) || {}; return { days: s.days || {}, cfg: { cycle: 28, period: 5, ...s.cfg }, cfgU: s.cfgU || 0, updated: s.updated }; };
+
+/* ---------- unione delle modifiche (due persone, due telefoni) ----------
+   Ogni giorno ha l'istante dell'ultima modifica (u). Un giorno cancellato resta come {d:1,u} ("lapide"),
+   così la cancellazione arriva anche all'altro telefono. Nell'unione vince, giorno per giorno, la modifica più recente. */
+const vivo = e => !!e && (e.flow > 0 || (e.sym || []).length > 0 || !!e.mood || !!e.note);
+const norm = e => vivo(e) ? JSON.stringify([e.flow || 0, e.sym || [], e.mood || '', e.note || '']) : null;
+const costruisciSnap = () => { const o = {}; for (const d in S.days) o[d] = norm(S.days[d]); return o; };
+function stampa() {
+  const now = Date.now();
+  for (const d of new Set([...Object.keys(S.days), ...Object.keys(snap)])) {
+    const e = S.days[d], n = norm(e);
+    if (n === (snap[d] ?? null)) continue;
+    if (n === null) S.days[d] = { d: 1, u: now };
+    else { const { d: _x, ...resto } = e; S.days[d] = { ...resto, u: now }; }
+    snap[d] = n;
+  }
+}
+function migra() { for (const e of Object.values(S.days)) if (!e.u) e.u = Date.now(); }
+function unisci(loc, rem) {
+  const out = { days: { ...loc.days }, cfg: { ...loc.cfg }, cfgU: loc.cfgU || 0 };
+  for (const [d, e] of Object.entries(rem.days || {})) { const l = out.days[d]; if (!l || (e.u || 0) > (l.u || 0)) out.days[d] = e; }
+  if ((rem.cfgU || 0) > out.cfgU) { out.cfg = { ...out.cfg, ...rem.cfg }; out.cfgU = rem.cfgU; }   // le impostazioni delle notifiche restano di ciascun telefono
+  return out;
+}
+const canon = e => vivo(e) ? [e.flow || 0, e.sym || [], e.mood || '', e.note || '', e.u || 0] : [e.u || 0];
+const ser = x => JSON.stringify([Object.keys(x.days).sort().map(d => [d, canon(x.days[d])]), +x.cfg?.cycle, +x.cfg?.period, x.cfgU || 0]);
+const pubblico = () => ({ v: 2, days: S.days, cfg: { cycle: S.cfg.cycle, period: S.cfg.period }, cfgU: S.cfgU || 0 });
+async function commit() { stampa(); S.updated = new Date().toISOString(); await kvSet('state', S); render(); sincronizzaSoon(); pianificaSoon(); }
 
 /* ---------- date ---------- */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -145,7 +172,7 @@ const MSG = {
 
 function ripulisci(d) {
   const e = S.days[d];
-  if (e && !e.flow && !(e.sym || []).length && !e.mood && !e.note) delete S.days[d];
+  if (e && !e.d && !vivo(e)) delete S.days[d];
 }
 // Segna (v = 1-3) o toglie (v = 0) la mestruazione.
 // Segnare il primo giorno di un nuovo periodo segna anche i successivi (durata media, ma non oltre oggi).
@@ -247,8 +274,16 @@ function boxAccount() {
   if (!sess) return auth.step === 'code'
     ? `<div class="box"><b>Account</b><p class="mut">Abbiamo inviato un codice a ${esc(auth.email)}. Inseriscilo qui sotto.</p><input id="cd" class="tx" inputmode="numeric" autocomplete="one-time-code" placeholder="Codice"><button class="btn" data-act="verifica">Accedi</button><button class="link" data-act="cambia">Usa un'altra email</button>${er}</div>`
     : `<div class="box"><b>Account e backup</b><p class="mut">Accedi con la tua email per salvare i dati cifrati e ritrovarli se cambi telefono.</p><input id="em" class="tx" type="email" autocomplete="email" placeholder="Email" value="${esc(auth.email)}"><button class="btn" data-act="invia">Invia codice</button>${er}</div>`;
-  if (!K) return `<div class="box"><b>Passphrase</b><p class="mut">${remoto ? 'Inserisci la passphrase per sbloccare il backup.' : 'Scegli una passphrase: cifra i dati prima che lascino il telefono. Se la perdi, il backup non è recuperabile.'}</p><input id="p1" class="tx" type="password" autocomplete="${remoto ? 'current-password' : 'new-password'}" placeholder="Passphrase">${remoto ? '' : '<input id="p2" class="tx" type="password" autocomplete="new-password" placeholder="Ripeti la passphrase">'}<button class="btn" data-act="sblocca">${remoto ? 'Sblocca' : 'Crea backup'}</button><button class="link" data-act="esci">Esci</button>${er}</div>`;
-  return `<div class="box"><b>Account</b><p class="mut">${esc(sess.email || '')}</p><p class="mut" id="sy">${esc(sync)}</p><div class="row"><button class="btn alt" data-act="sync">Sincronizza</button><button class="btn alt" data-act="esci">Esci</button></div></div>`;
+  if (!spazio) return `<div class="box"><b>Spazio condiviso</b><p class="mut">Se inizi tu, crea lo spazio e scegli la passphrase che userete in due. Se l'altra persona l'ha già creato, inserisci il suo codice di invito.</p>
+    <input id="p1" class="tx" type="password" autocomplete="new-password" placeholder="Passphrase condivisa"><input id="p2" class="tx" type="password" autocomplete="new-password" placeholder="Ripeti la passphrase"><button class="btn" data-act="creaSpazio">Crea lo spazio</button>
+    <p class="mut" style="margin-top:20px">Oppure entra con un codice di invito</p><input id="ci" class="tx" autocapitalize="characters" autocomplete="off" placeholder="Codice di invito"><button class="btn alt" data-act="entra">Entra nello spazio</button>
+    <button class="link" data-act="esci">Esci</button>${er}</div>`;
+  if (!K) return `<div class="box"><b>Passphrase</b><p class="mut">Inserisci la passphrase condivisa per sbloccare lo spazio.</p><input id="p1" class="tx" type="password" autocomplete="current-password" placeholder="Passphrase"><button class="btn" data-act="sblocca">Sblocca</button><button class="link" data-act="lascia">Lascia lo spazio</button><button class="link" data-act="esci">Esci</button>${er}</div>`;
+  return `<div class="box"><b>Spazio condiviso</b><p class="mut">${esc(sess.email || '')} – ${membriN} ${membriN === 1 ? 'persona' : 'persone'}</p><p class="mut" id="sy">${esc(sync)}</p>
+    ${codiceInvito ? `<div class="codice">${esc(codiceInvito)}</div><p class="mut">Valido 7 giorni, utilizzabile una volta. Mandalo a chi vuoi far entrare; la passphrase dagliela a voce, non per messaggio.</p><button class="btn" data-act="condividi">Condividi il codice</button>` : ''}
+    <div class="row"><button class="btn alt" data-act="sync">Sincronizza</button><button class="btn alt" data-act="invita">Invita</button></div>
+    <div class="row"><button class="btn alt" data-act="esci">Esci</button></div>
+    <button class="link" data-act="lascia">Lascia lo spazio</button>${membriN > 1 ? '<button class="link" data-act="scollega">Rimuovi l\'altra persona</button>' : ''}${er}</div>`;
 }
 
 function viewImp() {
@@ -258,7 +293,9 @@ function viewImp() {
     <label class="f">Durata mestruazione (giorni)<input type="number" min="1" max="12" value="${S.cfg.period}" data-cfg="period"></label></div>
     <div class="box"><b>Copia dei dati</b><p class="mut">Esporta un file di riserva o ripristina da uno già esportato.</p>
     <div class="row"><button class="btn alt" data-act="exp">Esporta</button><button class="btn alt" data-act="imp">Importa</button></div>
-    <input type="file" id="fi" accept="application/json" hidden></div>
+    <input type="file" id="fi" accept="application/json" hidden>
+    <button class="link danger" data-act="cancellaLocale">Cancella i dati di questo telefono</button>
+    <p class="mut">Se fai parte di uno spazio condiviso, i dati restano lì e si riscaricano alla prossima sincronizzazione. Per cancellare tutto, lascia prima lo spazio.</p></div>
     <p class="mut">Le previsioni sono stime basate sui cicli registrati: non sono uno strumento contraccettivo né diagnostico.</p>`;
 }
 
@@ -343,7 +380,7 @@ async function chiave(pass, salt) {
 }
 async function cifra() {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, K.k, enc.encode(JSON.stringify(S)));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, K.k, enc.encode(JSON.stringify(pubblico())));
   return { salt: K.salt, iv: b64(iv), data: b64(ct) };
 }
 const decifra = async (k, r) => JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(r.iv) }, k, ub64(r.data))));
@@ -366,28 +403,56 @@ async function token() {
   }
   return sess.at;
 }
-async function leggiRemoto() { const r = await api('/rest/v1/ciclo_backup?select=salt,iv,data,updated_at', {}, await token()); remoto = r && r[0] || null; }
+async function leggiSpazio() {
+  const r = await api(`/rest/v1/membri?select=spazio_id,spazi(salt)&user_id=eq.${sess.id}`, {}, await token());
+  spazio = r && r[0] ? { id: r[0].spazio_id, salt: r[0].spazi.salt } : null;
+  await (spazio ? kvSet('spazio', spazio) : kvDel('spazio'));
+}
+async function leggiRemoto() {
+  if (!spazio) { remoto = null; return; }
+  const r = await api(`/rest/v1/ciclo_dati?select=iv,data,updated_at&spazio_id=eq.${spazio.id}`, {}, await token());
+  remoto = r && r[0] || null;
+}
+async function leggiMembri() { try { const r = await api(`/rest/v1/membri?select=user_id&spazio_id=eq.${spazio.id}`, {}, await token()); membriN = r ? r.length : 0; } catch { } }
 const stato = m => { sync = m; const e = $('#sy'); if (e) e.textContent = m; };
+const ora = () => new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 let tm;
-function spingi() { if (sess && K) { clearTimeout(tm); tm = setTimeout(() => spingiOra().catch(() => { }), 1500); } }
-async function spingiOra() {
+const sincronizzaSoon = () => { if (sess && K && spazio) { clearTimeout(tm); tm = setTimeout(() => sincronizza().catch(() => { }), 1500); } };
+// Scrive solo se nessun altro ha scritto nel frattempo (confronto sull'istante dell'ultima scrittura); altrimenti riprova unendo.
+async function spingiOra(ver) {
+  const c = await cifra(), nuovo = new Date().toISOString(), tok = await token();
+  if (!ver) {
+    try { await api('/rest/v1/ciclo_dati', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ spazio_id: spazio.id, iv: c.iv, data: c.data, updated_at: nuovo }) }, tok); return true; }
+    catch (e) { if (e.status === 409) return false; throw e; }
+  }
+  const r = await api(`/rest/v1/ciclo_dati?spazio_id=eq.${spazio.id}&updated_at=eq.${encodeURIComponent(ver)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ iv: c.iv, data: c.data, updated_at: nuovo }) }, tok);
+  return Array.isArray(r) && r.length > 0;
+}
+// una sola sincronizzazione alla volta su questo telefono (apertura, timer, modifica): evita che si scavalchino
+let codaSinc = Promise.resolve();
+const sincronizza = () => (codaSinc = codaSinc.catch(() => { }).then(sincronizzaOra));
+async function sincronizzaOra() {
+  if (!sess || !K || !spazio) return;
   stato('Sincronizzazione…');
   try {
-    const c = await cifra();
-    await api('/rest/v1/ciclo_backup', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: sess.id, ...c, updated_at: S.updated || new Date().toISOString() }) }, await token());
-    stato('Sincronizzato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }));
-  } catch (e) { stato('Sincronizzazione non riuscita: ' + e.message); throw e; }
+    for (let i = 0; i < 4; i++) {
+      await leggiRemoto();
+      const ver = remoto ? remoto.updated_at : null, rem = remoto ? await decifra(K.k, remoto) : null;
+      if (rem) {
+        const m = unisci(S, rem);
+        if (ser(m) !== ser(S)) { S.days = m.days; S.cfg = { ...S.cfg, ...m.cfg }; S.cfgU = m.cfgU; await kvSet('state', S); snap = costruisciSnap(); render(); pianificaSoon(); }
+        if (ser(S) === ser(rem)) { stato('Sincronizzato alle ' + ora()); return; }
+      }
+      if (await spingiOra(ver)) { stato('Sincronizzato alle ' + ora()); return; }
+    }
+    stato('Sincronizzazione non completata, riprova tra poco');
+  } catch (e) { stato('Sincronizzazione non riuscita: ' + (e.name === 'OperationError' ? 'la passphrase non corrisponde a quella dello spazio' : e.message)); throw e; }
 }
-async function tira() {
-  if (!sess || !K) return;
-  await leggiRemoto();
-  if (!remoto) return spingiOra();
-  const rt = new Date(remoto.updated_at), lt = new Date(S.updated || 0);
-  if (rt > lt) { S = await decifra(K.k, remoto); await kvSet('state', S); render(); stato('Aggiornato dal backup'); pianificaSoon(); }
-  else if (lt > rt) await spingiOra();
-  else stato('Sincronizzato');
+async function esci(pulisci) {
+  if (pulisci && nf().on) { try { await notifOff(true); } catch { } }
+  sess = null; K = null; remoto = null; spazio = null; codiceInvito = ''; membriN = 0; auth = { step: 'email', email: '' };
+  await kvDel('sess'); await kvDel('key'); await kvDel('spazio');
 }
-async function esci(pulisci) { if (pulisci && nf().on) { try { await notifOff(true); } catch { } } sess = null; K = null; remoto = null; auth = { step: 'email', email: '' }; await kvDel('sess'); await kvDel('key'); }
 
 const azioni = {
   async invia() {
@@ -400,28 +465,53 @@ const azioni = {
   async verifica() {
     const code = $('#cd').value.trim(); if (!code) return;
     msg = ''; await salvaSess(await api('/auth/v1/verify', { method: 'POST', body: JSON.stringify({ type: 'email', email: auth.email, token: code }) }));
-    await leggiRemoto(); render();
+    await leggiSpazio(); await leggiRemoto(); if (spazio) await leggiMembri(); render();
+  },
+  async creaSpazio() {
+    const pass = $('#p1').value; msg = '';
+    if (pass.length < 8) throw new Error('La passphrase deve avere almeno 8 caratteri.');
+    if (pass !== $('#p2').value) throw new Error('Le due passphrase non coincidono.');
+    const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+    const id = await api('/rest/v1/rpc/crea_spazio', { method: 'POST', body: JSON.stringify({ p_salt: salt }) }, await token());
+    spazio = { id, salt }; await kvSet('spazio', spazio);
+    K = { k: await chiave(pass, ub64(salt)), salt }; keyOk = await salvaChiave();
+    remoto = null; snap = {}; await commit();
+    await sincronizza(); await leggiMembri(); render();
+  },
+  async entra() {
+    const code = $('#ci').value.trim(); if (!code) return; msg = '';
+    await api('/rest/v1/rpc/unisciti', { method: 'POST', body: JSON.stringify({ p_codice: code }) }, await token());
+    await leggiSpazio(); await leggiRemoto(); await leggiMembri(); render();
   },
   async sblocca() {
     const pass = $('#p1').value; msg = '';
-    if (!remoto) {
-      if (pass.length < 8) throw new Error('La passphrase deve avere almeno 8 caratteri.');
-      if (pass !== $('#p2').value) throw new Error('Le due passphrase non coincidono.');
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      K = { k: await chiave(pass, salt), salt: b64(salt) };
-      keyOk = await salvaChiave();
-      await spingiOra();
-    } else {
-      const k = await chiave(pass, ub64(remoto.salt)); let dati;
-      try { dati = await decifra(k, remoto); } catch { throw new Error('Passphrase errata.'); }
-      K = { k, salt: remoto.salt };
-      keyOk = await salvaChiave();
-      if (Object.keys(S.days).length && !confirm('Sul server ci sono già dei dati. OK = usa quelli del server (i dati di questo telefono vengono sostituiti). Annulla = tieni quelli di questo telefono e sovrascrivi il server.')) await spingiOra();
-      else { S = { days: dati.days || {}, cfg: { ...S.cfg, ...dati.cfg }, updated: dati.updated }; await kvSet('state', S); stato('Dati ripristinati dal backup'); }
-    }
-    render();
+    if (!remoto) await leggiRemoto();
+    if (!remoto) throw new Error('Lo spazio non contiene ancora dati: chi lo ha creato deve prima sincronizzare.');
+    const k = await chiave(pass, ub64(spazio.salt)); let dati;
+    try { dati = await decifra(k, remoto); } catch { throw new Error('Passphrase errata.'); }
+    K = { k, salt: spazio.salt }; keyOk = await salvaChiave();
+    if (Object.values(S.days).some(vivo) && !confirm('Questo telefono ha già dei dati. OK = uniscili a quelli dello spazio condiviso. Annulla = usa solo quelli dello spazio.')) { S.days = {}; S.cfgU = 0; }
+    const m = unisci(S, dati); S.days = m.days; S.cfg = { ...S.cfg, ...m.cfg }; S.cfgU = m.cfgU;
+    snap = costruisciSnap(); await kvSet('state', S);
+    await sincronizza(); render();
   },
-  async sync() { await tira(); },
+  async sync() { await sincronizza(); await leggiMembri(); render(); },
+  async invita() { codiceInvito = await api('/rest/v1/rpc/crea_invito', { method: 'POST', body: '{}' }, await token()); msg = ''; render(); },
+  async condividi() {
+    const t = `Codice per entrare nello spazio Muudays: ${codiceInvito}`;
+    if (navigator.share) { try { await navigator.share({ title: 'Muudays', text: t }); } catch { } }
+    else { await navigator.clipboard.writeText(t); msg = 'Codice copiato.'; render(); }
+  },
+  async lascia() {
+    if (!confirm('Lasciare lo spazio condiviso? Su questo telefono resta una copia dei dati, ma non verrà più sincronizzata.')) return;
+    await api('/rest/v1/rpc/lascia_spazio', { method: 'POST', body: '{}' }, await token());
+    spazio = null; K = null; remoto = null; codiceInvito = ''; membriN = 0; await kvDel('spazio'); await kvDel('key'); render();
+  },
+  async scollega() {
+    if (!confirm('Rimuovere dallo spazio tutte le altre persone? Se conoscono la passphrase restano comunque in possesso dei dati che hanno già sul telefono.')) return;
+    await api('/rest/v1/rpc/rimuovi_altri', { method: 'POST', body: '{}' }, await token());
+    codiceInvito = ''; await leggiMembri(); render();
+  },
   async esci() { await esci(true); msg = ''; render(); },
   exp() {
     const a = document.createElement('a');
@@ -429,6 +519,10 @@ const azioni = {
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
   imp() { $('#fi').click(); },
+  async cancellaLocale() {
+    if (!confirm('Cancellare tutti i dati su questo telefono?')) return;
+    await kvDel('state'); location.reload();
+  },
   async notifOn() { msgN = ''; await notifOn(); msgN = 'Notifiche attivate.'; render(); },
   async notifOff() { await notifOff(); msgN = ''; render(); },
   async notifTest() { await notifTest(); msgN = 'Se vedi la notifica, tutto ok.'; $('#ne') && ($('#ne').textContent = msgN); },
@@ -555,13 +649,14 @@ $('#v').addEventListener('click', async e => {
 });
 $('#v').addEventListener('change', async e => {
   if (e.target.dataset.nf) { const k = e.target.dataset.nf; S.cfg.notif = { ...nf(), [k]: e.target.type === 'checkbox' ? e.target.checked : k === 'pre' ? +e.target.value : e.target.value }; return commit(); }
-  if (e.target.dataset.cfg) { S.cfg[e.target.dataset.cfg] = Math.max(1, +e.target.value || 1); return commit(); }
+  if (e.target.dataset.cfg) { S.cfg[e.target.dataset.cfg] = Math.max(1, +e.target.value || 1); S.cfgU = Date.now(); return commit(); }
   if (e.target.id === 'fi' && e.target.files[0]) {
     try {
       const j = JSON.parse(await e.target.files[0].text());
       if (!j.days || typeof j.days !== 'object') throw 0;
       if (!confirm('Sostituire i dati attuali con quelli del file?')) return;
-      S = { days: j.days, cfg: { ...S.cfg, ...j.cfg } }; await commit();
+      const { notif: _n, ...cfgImp } = j.cfg || {};
+      S = { days: j.days, cfg: { ...S.cfg, ...cfgImp }, cfgU: Date.now() }; await commit();
     } catch { alert('File non valido: scegli un file esportato da Muudays.'); }
   }
 });
@@ -576,14 +671,25 @@ $('#v').addEventListener('touchend', e => {
   const dx = e.changedTouches[0].clientX - tx0; tx0 = null;
   if (Math.abs(dx) > 50) { sett = add(sett, dx < 0 ? 7 : -7); render(); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) tira().catch(() => { }); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizza().catch(() => { }); });
+setInterval(() => { if (!document.hidden) sincronizza().catch(() => { }); }, 45000);
 
 (async () => {
-  S = await load(); sess = await kvGet('sess'); K = await kvGet('key');
+  S = await load(); migra(); snap = costruisciSnap();
+  sess = await kvGet('sess'); K = await kvGet('key'); spazio = await kvGet('spazio');
   sel = oggi(); sett = mondayOf(sel);
   navigator.storage?.persist?.();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  if ('serviceWorker' in navigator) {
+    const aveva = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js');
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (aveva && !$('.upd')) document.body.insertAdjacentHTML('beforeend', '<div class="upd"><span>Aggiornamento disponibile</span><button onclick="location.reload()">Ricarica</button></div>');
+    });
+  }
   render();
-  if (sess && K) tira().catch(e => stato('Sincronizzazione non riuscita: ' + e.message));
-  else if (sess) leggiRemoto().then(render).catch(() => { });
+  if (sess && !spazio) leggiSpazio().then(() => leggiRemoto()).then(() => { if (tab === 'imp') render(); }).catch(() => { });
+  if (sess && spazio) {
+    leggiMembri().then(() => { if (tab === 'imp') render(); });
+    if (K) sincronizza().catch(() => { }); else leggiRemoto().catch(() => { });
+  }
 })();

@@ -216,3 +216,16 @@ input[type=checkbox]{width:24px;height:24px;accent-color:var(--per)}
    l'intestazione parte più in basso, così nessun contenuto finisce sotto la sfocatura */
 body{padding-top:0}
 header{padding-top:calc(env(safe-area-inset-top, 0px) + 30px)}
+
+/* Muudays 11: codice di invito */
+.codice{font:700 28px ui-monospace,Menlo,monospace;letter-spacing:4px;text-align:center;padding:14px;margin:12px 0;border-radius:16px;background:var(--bg);border:1px dashed var(--line)}
+
+/* Muudays 12: avviso aggiornamento e versione desktop (colonna centrata) */
+.upd{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);border-radius:16px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;z-index:80;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.28)}
+.upd button{border:0;background:var(--per);color:#fff;border-radius:999px;padding:8px 16px;font-weight:700;font-size:15px}
+@media (min-width:700px){
+  header,main{width:100%;max-width:560px;align-self:center}
+  main{border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  header{padding-top:24px}
+  .upd{left:50%;right:auto;transform:translateX(-50%);width:480px}
+}

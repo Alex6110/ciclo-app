@@ -8,7 +8,7 @@ const SINT = ['Crampi', 'Mal di testa', 'Gonfiore', 'Stanchezza', 'Acne', 'Mal d
 const UMORI = ['Bene', 'Neutro', 'Triste', 'Irritabile', 'Ansiosa'];
 
 let S, sess = null, K = null, remoto = null, sync = '', msg = '', spazio = null, snap = {}, codiceInvito = '', membriN = 0;
-let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '', keyOk = null;
+let auth = { step: 'email', email: '' }, tab = 'oggi', sel, sett, editMest = false, calDa = 18, scrollCal = '', calVista = 'mese', annoSel = new Date().getFullYear(), mIdx = 0, faseOggi = 'no', msgN = '', keyOk = null, guidaPasso = 0, installPrompt = null;
 let mese = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
 /* ---------- archivio locale (IndexedDB) ---------- */
@@ -294,13 +294,53 @@ function viewImp() {
     <div class="box"><b>Copia dei dati</b><p class="mut">Esporta un file di riserva o ripristina da uno già esportato.</p>
     <div class="row"><button class="btn alt" data-act="exp">Esporta</button><button class="btn alt" data-act="imp">Importa</button></div>
     <input type="file" id="fi" accept="application/json" hidden>
+    <button class="link" data-act="guida">Rivedi la guida</button>
     <button class="link danger" data-act="cancellaLocale">Cancella i dati di questo telefono</button>
     <p class="mut">Se fai parte di uno spazio condiviso, i dati restano lì e si riscaricano alla prossima sincronizzazione. Per cancellare tutto, lascia prima lo spazio.</p></div>
     <p class="mut">Le previsioni sono stime basate sui cicli registrati: non sono uno strumento contraccettivo né diagnostico.</p>`;
 }
 
+const desk = () => matchMedia('(min-width: 1000px)').matches;
+function viewCalDesk() {
+  const st = stats(), pr = predici(st), t = oggi(), now = new Date();
+  const cella = (d, i, attr, extra = '') => `<button class="${['d', ...classi(d, pr), ...(d === t ? ['t'] : []), ...(d === sel && extra !== 'y' ? ['sel'] : [])].join(' ')}" ${attr}>${i}</button>`;
+  const seg = `<div class="seg"><button data-v="mese" class="${calVista === 'mese' ? 'on' : ''}">Mese</button><button data-v="anno" class="${calVista === 'anno' ? 'on' : ''}">Anno</button></div>`;
+  if (calVista === 'anno') {
+    let h = `<div class="dc-top"><h2>${annoSel}</h2><div class="dc-ctl"><button class="rnd" data-y="-1" aria-label="Anno precedente">‹</button><button class="rnd" data-y="1" aria-label="Anno successivo">›</button>${seg}</div></div><div class="yg yg3">`;
+    for (let m = 0; m < 12; m++) {
+      const m0 = new Date(annoSel, m, 1), n = new Date(annoSel, m + 1, 0).getDate();
+      let c = '<span class="d x"></span>'.repeat((m0.getDay() + 6) % 7);
+      for (let i = 1; i <= n; i++) c += cella(iso(new Date(annoSel, m, i)), i, `data-ym="${annoSel}-${m}"`, 'y');
+      h += `<div class="ym"><h4>${m0.toLocaleDateString('it-IT', { month: 'long' })}</h4><div class="grid">${c}</div></div>`;
+    }
+    return h + '</div>';
+  }
+  const y = mese.getFullYear(), m = mese.getMonth(), n = new Date(y, m + 1, 0).getDate();
+  let cells = '<span class="d x"></span>'.repeat((new Date(y, m, 1).getDay() + 6) % 7);
+  for (let i = 1; i <= n; i++) { const d = iso(new Date(y, m, i)); cells += cella(d, i, `data-d="${d}"`); }
+  return `<div class="dc-top"><h2>${mese.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</h2><div class="dc-ctl"><button class="rnd" data-m="-1" aria-label="Mese precedente">‹</button><button class="txt" data-mo="oggi">Oggi</button><button class="rnd" data-m="1" aria-label="Mese successivo">›</button>${seg}</div></div>
+    <div class="grid dcg">${['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(x => `<span class="dw">${x}</span>`).join('')}${cells}</div>
+    <div class="dc-foot"><button class="btn inl${editMest ? '' : ' alt'}" data-act="edit">${editMest ? 'Fine modifica' : 'Modifica mestruazioni'}</button>
+    <div class="leg"><span><i class="lg p"></i>Mestruazione</span><span><i class="lg pp"></i>Prevista</span><span><i class="lg f"></i>Ovulazione</span><span><i class="lg o"></i>Più fertile</span></div></div>
+    <p class="mut">${editMest ? 'Clicca i giorni per aggiungere o togliere la mestruazione.' : 'Clicca un giorno per vederlo a sinistra; doppio clic per modificarlo.'}</p>`;
+}
+function viewDesk() {
+  const nav = `<aside class="dk-nav"><div class="dk-brand"><img src="icon-192.png" alt="" width="40" height="40"><span>Muudays</span></div>
+    <button data-t="oggi" class="${tab !== 'imp' ? 'on' : ''}">${IC.cal}<span>Il mio ciclo</span></button>
+    <button data-t="imp" class="${tab === 'imp' ? 'on' : ''}">${IC.gear}<span>Impostazioni</span></button>
+    <div class="dk-foot">${sess ? `<b>${esc(sess.email || '')}</b><span>${esc(sync)}</span>` : '<span>Accesso non effettuato</span>'}</div></aside>`;
+  if (tab === 'imp') return `<div class="dk">${nav}<section class="dk-imp">${viewImp()}</section></div>`;
+  return `<div class="dk">${nav}<section class="dk-oggi">${viewOggi()}</section><section class="dk-cal">${viewCalDesk()}</section></div>`;
+}
 function render() {
   const v = $('#v'), hl = $('#hl'), hr = $('#hr'), hc = $('#hc');
+  if (desk()) {
+    if (tab === 'cal') tab = 'oggi';
+    v.className = 'dkv'; v.innerHTML = viewDesk();
+    const sc = $('.scene'); if (sc) scenaInit(sc);
+    return;
+  }
+  v.classList.remove('dkv');
   v.innerHTML = { oggi: viewOggi, cal: viewCal, imp: viewImp }[tab]();
   v.classList.toggle('cal', tab === 'cal');
   hr.style.visibility = tab === 'imp' ? 'hidden' : 'visible';
@@ -519,6 +559,7 @@ const azioni = {
     a.download = `muudays-${oggi()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   },
   imp() { $('#fi').click(); },
+  guida() { mostraGuida(0); },
   async cancellaLocale() {
     if (!confirm('Cancellare tutti i dati su questo telefono?')) return;
     await kvDel('state'); location.reload();
@@ -541,7 +582,7 @@ const azioni = {
 /* ---------- notifiche push ---------- */
 // Il server conosce solo l'orario di invio: titolo e testo sono cifrati sul telefono con la chiave del backup
 // e decifrati dal service worker quando la notifica arriva.
-const NF0 = { on: false, mest: true, ovul: true, pre: 2, ora: '09:00' };
+const NF0 = { on: false, mest: true, ovul: true, rit: true, pre: 2, ora: '09:00' };
 const nf = () => ({ ...NF0, ...(S.cfg.notif || {}) });
 const u8 = x => { const b = atob((x + '='.repeat((4 - x.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
 function pushOk() {
@@ -552,18 +593,24 @@ function eventiNotifica() {
   const n = nf(); if (!n.on) return [];
   const pr = predici(stats()); if (!pr) return [];
   const [h, mi] = n.ora.split(':').map(Number), now = Date.now(), out = [];
+  const fd = d => parse(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
   const aggiungi = (d, t, b) => { const [y, m, g] = d.split('-').map(Number), dt = new Date(y, m - 1, g, h, mi, 0); if (dt.getTime() > now) out.push({ at: dt.toISOString(), t, b }); };
-  for (const x of pr.list.slice(0, 3)) {
+  pr.list.slice(0, 3).forEach((x, k) => {
     if (n.mest) {
-      aggiungi(add(x.s, -n.pre), 'Ciclo in arrivo', `Tra ${n.pre} ${n.pre === 1 ? 'giorno' : 'giorni'} dovrebbe iniziare la mestruazione.`);
-      aggiungi(x.s, 'Mestruazione prevista', 'Oggi dovrebbe iniziare il ciclo.');
+      aggiungi(add(x.s, -n.pre), 'Ciclo in arrivo', `Tra ${n.pre} ${n.pre === 1 ? 'giorno' : 'giorni'}, ${fd(x.s)}, dovrebbe iniziare la mestruazione. Quando arriva, segna il primo giorno in Muudays: le previsioni diventano più precise.`);
+      aggiungi(x.s, 'Mestruazione prevista oggi', 'Oggi dovrebbe iniziare il ciclo. Se è già arrivato, segnalo in Muudays; altrimenti ti avviso se tarda.');
     }
     if (n.ovul) {
-      aggiungi(x.w.da, 'Ovulazione', 'Da oggi sei nella finestra fertile.');
-      aggiungi(x.w.pk, 'Giorno più fertile', 'Oggi la probabilità di rimanere incinta è la più alta.');
+      aggiungi(x.w.da, 'Inizia la finestra fertile', `Da oggi fino a ${fd(x.w.a)} le probabilità di concepimento sono più alte; il giorno più probabile è ${fd(x.w.pk)}. È una stima basata sui tuoi cicli.`);
+      aggiungi(x.w.pk, 'Oggi è il giorno più fertile', 'Secondo le tue previsioni oggi la probabilità di rimanere incinta è la più alta di questo ciclo. È una stima, non un metodo contraccettivo.');
     }
-  }
-  return out.sort((a, b) => a.at < b.at ? -1 : 1).slice(0, 16);
+    if (n.rit && k === 0) {
+      aggiungi(add(x.s, 1), 'Ciclo in ritardo di 1 giorno', 'La mestruazione prevista per ieri non è ancora stata segnata. Se è già iniziata, aggiornala in Muudays.');
+      aggiungi(add(x.s, 3), 'Ciclo in ritardo di 3 giorni', 'Sono passati 3 giorni dalla data prevista e non risulta ancora una mestruazione. Se è arrivata, segnala il primo giorno in Muudays.');
+      aggiungi(add(x.s, 7), 'Ciclo in ritardo di una settimana', 'È passata una settimana dalla data prevista. Se il ritardo continua, può essere utile parlarne con il medico.');
+    }
+  });
+  return out.sort((a, b) => a.at < b.at ? -1 : 1).slice(0, 24);
 }
 const cifraMsg = async (t, b) => { const iv = crypto.getRandomValues(new Uint8Array(12)); return { iv: b64(iv), data: b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, K.k, enc.encode(JSON.stringify({ t, b })))) }; };
 let tn, coda = Promise.resolve();
@@ -617,7 +664,7 @@ function boxNotifiche() {
   if (!n.on) return `<div class="box"><b>Notifiche</b><p class="mut">Un avviso quando sta per arrivare il ciclo o inizia l'ovulazione. Serve l'account con il backup sbloccato${navigator.standalone === false ? ', e su iPhone l\'app deve essere aggiunta alla schermata Home' : ''}.</p><button class="btn" data-act="notifOn">Attiva notifiche</button>${er}</div>`;
   const sw = (k, lab) => `<label class="f">${lab}<input type="checkbox" data-nf="${k}" ${n[k] ? 'checked' : ''}></label>`;
   return `<div class="box"><b>Notifiche</b>
-    ${sw('mest', 'Ciclo in arrivo')}${sw('ovul', 'Ovulazione e giorno più fertile')}
+    ${sw('mest', 'Ciclo in arrivo e giorno previsto')}${sw('ovul', 'Finestra fertile e giorno più fertile')}${sw('rit', 'Ciclo in ritardo')}
     <label class="f">Giorni di preavviso per il ciclo<select data-nf="pre">${[1, 2, 3].map(x => `<option${x === n.pre ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
     <label class="f">Orario<input type="time" data-nf="ora" value="${n.ora}"></label>
     <p class="mut">Chiave per il testo delle notifiche: ${keyOk === false ? 'non salvata (esci e riaccedi con la passphrase)' : 'salvata'}.</p>
@@ -625,10 +672,58 @@ function boxNotifiche() {
     <button class="link" data-act="notifOff">Disattiva notifiche</button>${er}</div>`;
 }
 
+/* ---------- guida alla prima apertura ---------- */
+const piattaforma = () => {
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return { ios, android: /Android/.test(ua), installata: navigator.standalone === true || matchMedia('(display-mode: standalone)').matches };
+};
+const legenda = (c, t) => `<li><i class="gl ${c}">${c === 'f' ? '12' : ''}</i>${t}</li>`;
+function passiGuida() {
+  const p = piattaforma();
+  const install = p.installata
+    ? '<p>Muudays è già installata su questo dispositivo: la trovi nell\'icona sulla schermata Home, e da lì funzionano anche le notifiche.</p>'
+    : p.ios ? '<ol><li>Apri questo sito con <b>Safari</b> (con altri browser su iPhone non si può installare).</li><li>Tocca <b>Condividi</b>, il quadrato con la freccia verso l\'alto.</li><li>Scorri e tocca <b>Aggiungi alla schermata Home</b>, poi <b>Aggiungi</b>.</li><li>Da ora apri Muudays dalla sua icona: solo così funzionano le notifiche.</li></ol>'
+    : p.android ? `<ol><li>Tocca il menu <b>⋮</b> del browser.</li><li>Scegli <b>Installa app</b> (o «Aggiungi a schermata Home»).</li></ol>${installPrompt ? '<button class="btn" data-g="installa">Installa ora</button>' : ''}`
+    : `<ol><li>In <b>Chrome</b> o <b>Edge</b>: clicca l'icona <b>Installa</b> nella barra dell'indirizzo, oppure menu ⋮ → «Installa Muudays».</li><li>In <b>Safari</b> su Mac: menu File → <b>Aggiungi al Dock</b>.</li></ol>${installPrompt ? '<button class="btn" data-g="installa">Installa ora</button>' : ''}`;
+  return [
+    { t: 'Benvenuta in Muudays', h: '<p>Il tuo ciclo, senza pubblicità. In due minuti ti mostro come funziona.</p>', mascotte: true },
+    { t: 'Installa l\'app', h: install, ic: 'cal' },
+    { t: 'Registra il ciclo', h: '<p>Tocca <b>Mestruazioni</b> il primo giorno: l\'app segna da sola i giorni successivi, per la durata media.</p><p>Per correggere apri il calendario e usa <b>Modifica mestruazioni</b>. Se un ciclo è sbagliato, apri uno dei suoi giorni e tocca <b>Elimina ciclo</b>.</p>', ic: 'drop' },
+    { t: 'Sintomi, umore e note', h: '<p>Da <b>Sintomi</b>, <b>Umore</b> e <b>Note</b> registri come stai giorno per giorno. Ogni scelta si salva appena la tocchi.</p>', ic: 'mood' },
+    { t: 'Calendario e previsioni', h: `<ul class="gl-l">${legenda('p', 'Mestruazione registrata')}${legenda('pp', 'Mestruazione prevista')}${legenda('f', 'Numeri verdi: finestra fertile (ovulazione)')}${legenda('o', 'Cerchio verde: giorno più probabile')}</ul><p>Con <b>Anno</b> vedi tutto l'anno: le previsioni arrivano fino alla fine dell'anno prossimo e migliorano con ogni ciclo che registri.</p>`, ic: 'cal' },
+    { t: 'Muu, la mascotte', h: '<p>Cambia ogni giorno. Toccala sulla testa, sul corpo, sulla coda o nell\'acqua: reagisce in modo diverso. Tienila premuta per le coccole; gli occhi seguono il dito.</p>', mascotte: true },
+    { t: 'Notifiche', h: '<p>Muudays ti avvisa quando sta per arrivare il ciclo, quando inizia la finestra fertile, nel giorno più fertile e se il ciclo è in ritardo.</p><p>Si attivano da <b>Impostazioni → Notifiche</b>. Servono l\'account e, su iPhone, l\'app installata dalla Home.</p>', ic: 'plus' },
+    { t: 'Account e spazio condiviso', h: '<p>Accedi dalle Impostazioni con la tua email: ti arriva un codice. Poi scegli una <b>passphrase</b>: cifra i dati sul telefono e nemmeno il server può leggerli. <b>Annotala</b>: se la perdi i dati nel cloud non si recuperano.</p><p>Per condividere il ciclo con una persona di fiducia usa <b>Invita</b>: genera un codice da inviare; l\'altra persona lo inserisce e usa la stessa passphrase. Le modifiche di entrambi si uniscono.</p>', ic: 'note' },
+    { t: 'Tutto pronto', h: '<p>Puoi rivedere questa guida quando vuoi da <b>Impostazioni → Guida</b>.</p>', mascotte: true }
+  ];
+}
+function mostraGuida(da = 0) {
+  guidaPasso = da; $('#gd')?.remove();
+  const passi = passiGuida(), p = passi[guidaPasso], ultimo = guidaPasso === passi.length - 1;
+  const ill = p.mascotte ? `<div class="scene s${scena(oggi(), guidaPasso % 7).bg}">${scena(oggi(), guidaPasso === 0 ? 0 : guidaPasso === 5 ? 1 : 3).svg}</div>` : `<div class="gd-ic">${IC[p.ic]}</div>`;
+  document.body.insertAdjacentHTML('beforeend', `<div class="gd" id="gd"><div class="gd-in">${ill}<h2>${p.t}</h2><div class="gd-body">${p.h}</div>
+    <div class="gd-dots">${passi.map((_, i) => `<i class="${i === guidaPasso ? 'on' : ''}"></i>`).join('')}</div>
+    <div class="gd-btns">${guidaPasso ? '<button class="btn alt" data-g="ind">Indietro</button>' : '<button class="btn alt" data-g="salta">Salta</button>'}<button class="btn" data-g="${ultimo ? 'fine' : 'avanti'}">${ultimo ? 'Inizia' : 'Avanti'}</button></div></div></div>`);
+}
+async function chiudiGuida() { $('#gd')?.remove(); await kvSet('guida', Date.now()); }
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-g]'); if (!b || !$('#gd')) return;
+  const g = b.dataset.g;
+  if (g === 'avanti') mostraGuida(guidaPasso + 1);
+  else if (g === 'ind') mostraGuida(Math.max(0, guidaPasso - 1));
+  else if (g === 'installa') { try { installPrompt.prompt(); await installPrompt.userChoice; } catch { } installPrompt = null; mostraGuida(guidaPasso); }
+  else await chiudiGuida();
+});
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; });
+
 /* ---------- eventi ---------- */
 $('#v').addEventListener('click', async e => {
-  const b = e.target.closest('[data-d],[data-m],[data-act],[data-sel],[data-s],[data-ym],[data-y]'); if (!b) return;
+  const b = e.target.closest('[data-d],[data-m],[data-act],[data-sel],[data-s],[data-ym],[data-y],[data-t],[data-v],[data-mo]'); if (!b) return;
+  if (b.dataset.t) { tab = b.dataset.t; return render(); }
+  if (b.dataset.v) { calVista = b.dataset.v; annoSel = mese.getFullYear(); return render(); }
+  if (b.dataset.mo) { const n = new Date(); mese = new Date(n.getFullYear(), n.getMonth(), 1); sel = oggi(); sett = mondayOf(sel); return render(); }
   if (b.dataset.d) {
+    if (!editMest && desk()) { sel = b.dataset.d; sett = mondayOf(sel); mIdx = 0; return render(); }
     if (!editMest) return apriGiorno(b.dataset.d);
     setFlow(b.dataset.d, S.days[b.dataset.d]?.flow > 0 ? 0 : 2);
     return commit();
@@ -637,7 +732,7 @@ $('#v').addEventListener('click', async e => {
   if (b.dataset.ym) {
     const [y, m] = b.dataset.ym.split('-').map(Number), now = new Date();
     calDa = Math.max(calDa, now.getFullYear() * 12 + now.getMonth() - (y * 12 + m) + 1);
-    calVista = 'mese'; scrollCal = idMese(y, m); return render();
+    calVista = 'mese'; scrollCal = idMese(y, m); mese = new Date(y, m, 1); return render();
   }
   if (b.dataset.y) { annoSel = Math.min(new Date().getFullYear() + 1, Math.max(new Date().getFullYear() - 6, annoSel + +b.dataset.y)); return render(); }
   if (b.dataset.s) return apriGiorno(sel, [b.dataset.s]);
@@ -671,6 +766,8 @@ $('#v').addEventListener('touchend', e => {
   const dx = e.changedTouches[0].clientX - tx0; tx0 = null;
   if (Math.abs(dx) > 50) { sett = add(sett, dx < 0 ? 7 : -7); render(); }
 });
+$('#v').addEventListener('dblclick', e => { const b = e.target.closest('[data-d]'); if (b && desk() && !editMest) apriGiorno(b.dataset.d); });
+matchMedia('(min-width: 1000px)').addEventListener('change', () => render());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sincronizza().catch(() => { }); });
 setInterval(() => { if (!document.hidden) sincronizza().catch(() => { }); }, 45000);
 
@@ -687,6 +784,7 @@ setInterval(() => { if (!document.hidden) sincronizza().catch(() => { }); }, 450
     });
   }
   render();
+  if (!(await kvGet('guida'))) mostraGuida(0);
   if (sess && !spazio) leggiSpazio().then(() => leggiRemoto()).then(() => { if (tab === 'imp') render(); }).catch(() => { });
   if (sess && spazio) {
     leggiMembri().then(() => { if (tab === 'imp') render(); });
